@@ -114,7 +114,10 @@ def test_get_activity_by_id_returns_404_when_missing() -> None:
 def test_generate_rapport_creates_and_persists_a_rapport() -> None:
     activity_repo = FakeRepository(existing=[_record("1", datetime(2024, 6, 1, 7, 0))])
     rapport_repo = FakeRapportRepository()
-    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+    llm = FakeLLMClient(
+        '{"strengths": "Good pace.", "improvements": "Add strides.", '
+        '"completed_as_planned": true, "perceived_effort": "as_expected", "flag": "none"}'
+    )
 
     with overriding_dependencies(
         {
@@ -158,6 +161,9 @@ def test_get_rapport_returns_the_persisted_rapport() -> None:
                 strengths="Good pace.",
                 improvements="Add strides.",
                 generated_at=datetime(2024, 6, 1, 8, 0),
+                completed_as_planned=True,
+                perceived_effort="as_expected",
+                flag="none",
             )
         ]
     )

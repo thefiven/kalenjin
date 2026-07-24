@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import pytest
@@ -19,8 +20,26 @@ def _activity(activity_id: str, started_at: datetime, distance: float = 5000.0) 
     )
 
 
+def _llm_response(
+    strengths: str = "Good pace.",
+    improvements: str = "Add strides.",
+    completed_as_planned: bool = True,
+    perceived_effort: str = "as_expected",
+    flag: str = "none",
+) -> str:
+    return json.dumps(
+        {
+            "strengths": strengths,
+            "improvements": improvements,
+            "completed_as_planned": completed_as_planned,
+            "perceived_effort": perceived_effort,
+            "flag": flag,
+        }
+    )
+
+
 def test_generate_rapport_includes_activity_metrics_in_the_prompt() -> None:
-    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+    llm = FakeLLMClient(_llm_response())
     activity = _activity("1", datetime(2024, 6, 1, 7, 30))
 
     generate_rapport(activity, history=[], llm=llm)
@@ -33,7 +52,7 @@ def test_generate_rapport_includes_activity_metrics_in_the_prompt() -> None:
 
 
 def test_generate_rapport_includes_recent_history_in_the_prompt() -> None:
-    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+    llm = FakeLLMClient(_llm_response())
     activity = _activity("2", datetime(2024, 6, 5, 7, 30), distance=6000.0)
     history = [_activity("1", datetime(2024, 6, 1, 7, 30), distance=5000.0)]
 
@@ -45,7 +64,7 @@ def test_generate_rapport_includes_recent_history_in_the_prompt() -> None:
 
 
 def test_generate_rapport_parses_the_json_response_into_a_record() -> None:
-    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+    llm = FakeLLMClient(_llm_response())
     activity = _activity("1", datetime(2024, 6, 1, 7, 30))
 
     rapport = generate_rapport(activity, history=[], llm=llm, now=datetime(2024, 6, 1, 8, 0))
@@ -54,10 +73,42 @@ def test_generate_rapport_parses_the_json_response_into_a_record() -> None:
     assert rapport.strengths == "Good pace."
     assert rapport.improvements == "Add strides."
     assert rapport.generated_at == datetime(2024, 6, 1, 8, 0)
+    assert rapport.completed_as_planned is True
+    assert rapport.perceived_effort == "as_expected"
+    assert rapport.flag == "none"
+
+
+def test_generate_rapport_parses_the_adjustment_signal() -> None:
+    llm = FakeLLMClient(
+        _llm_response(completed_as_planned=False, perceived_effort="high", flag="pain")
+    )
+    activity = _activity("1", datetime(2024, 6, 1, 7, 30))
+
+    rapport = generate_rapport(activity, history=[], llm=llm)
+
+    assert rapport.completed_as_planned is False
+    assert rapport.perceived_effort == "high"
+    assert rapport.flag == "pain"
+
+
+def test_generate_rapport_raises_when_perceived_effort_is_not_a_known_value() -> None:
+    llm = FakeLLMClient(_llm_response(perceived_effort="extreme"))
+    activity = _activity("1", datetime(2024, 6, 1, 7, 30))
+
+    with pytest.raises(RapportGenerationError):
+        generate_rapport(activity, history=[], llm=llm)
+
+
+def test_generate_rapport_raises_when_flag_is_not_a_known_value() -> None:
+    llm = FakeLLMClient(_llm_response(flag="something_else"))
+    activity = _activity("1", datetime(2024, 6, 1, 7, 30))
+
+    with pytest.raises(RapportGenerationError):
+        generate_rapport(activity, history=[], llm=llm)
 
 
 def test_generate_rapport_strips_markdown_code_fences_from_the_response() -> None:
-    llm = FakeLLMClient('```json\n{"strengths": "Good pace.", "improvements": "Add strides."}\n```')
+    llm = FakeLLMClient(f"```json\n{_llm_response()}\n```")
     activity = _activity("1", datetime(2024, 6, 1, 7, 30))
 
     rapport = generate_rapport(activity, history=[], llm=llm)
