@@ -40,6 +40,19 @@ class FakeRepository:
             self._existing[activity.garmin_activity_id] = activity
         return inserted
 
+    def list_activities(
+        self, since: date | None = None, until: date | None = None
+    ) -> list[ActivityRecord]:
+        activities = self._existing.values()
+        if since is not None:
+            activities = (a for a in activities if a.started_at.date() >= since)
+        if until is not None:
+            activities = (a for a in activities if a.started_at.date() <= until)
+        return sorted(activities, key=lambda a: a.started_at, reverse=True)
+
+    def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None:
+        return self._existing.get(garmin_activity_id)
+
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
     return {

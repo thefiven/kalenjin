@@ -37,3 +37,11 @@ class ActivityRepository(Protocol):
         Returns the number of newly-inserted activities.
         """
         ...
+
+    def list_activities(
+        self, since: date | None = None, until: date | None = None
+    ) -> list[ActivityRecord]:
+        """All activities whose start date falls within [since, until], most recent first."""
+        ...
+
+    def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None: ...
