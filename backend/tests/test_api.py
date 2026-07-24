@@ -8,12 +8,21 @@ from kalenjin.api import (
     get_activity_repository,
     get_activity_source,
     get_llm_client,
+    get_objectif_repository,
+    get_plan_repository,
     get_rapport_repository,
 )
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
-from support.fakes import FakeLLMClient, FakeRapportRepository, FakeRepository, raw_activity
+from support.fakes import (
+    FakeLLMClient,
+    FakeObjectifRepository,
+    FakePlanRepository,
+    FakeRapportRepository,
+    FakeRepository,
+    raw_activity,
+)
 
 
 class _AnyRangeSource:
@@ -41,7 +50,13 @@ def test_sync_endpoint_reports_the_number_of_imported_activities() -> None:
     repo = FakeRepository()
 
     with overriding_dependencies(
-        {get_activity_source: lambda: source, get_activity_repository: lambda: repo}
+        {
+            get_activity_source: lambda: source,
+            get_activity_repository: lambda: repo,
+            get_objectif_repository: lambda: FakeObjectifRepository(),
+            get_plan_repository: lambda: FakePlanRepository(),
+            get_llm_client: lambda: FakeLLMClient(""),
+        }
     ):
         response = TestClient(app).post("/sync")
 
@@ -114,12 +129,16 @@ def test_get_activity_by_id_returns_404_when_missing() -> None:
 def test_generate_rapport_creates_and_persists_a_rapport() -> None:
     activity_repo = FakeRepository(existing=[_record("1", datetime(2024, 6, 1, 7, 0))])
     rapport_repo = FakeRapportRepository()
-    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+    llm = FakeLLMClient(
+        '{"strengths": "Good pace.", "improvements": "Add strides.", '
+        '"completed_as_planned": true, "perceived_effort": "as_expected", "flag": "none"}'
+    )
 
     with overriding_dependencies(
         {
             get_activity_repository: lambda: activity_repo,
             get_rapport_repository: lambda: rapport_repo,
+            get_plan_repository: lambda: FakePlanRepository(),
             get_llm_client: lambda: llm,
         }
     ):
@@ -142,6 +161,7 @@ def test_generate_rapport_returns_404_when_activity_is_missing() -> None:
         {
             get_activity_repository: lambda: activity_repo,
             get_rapport_repository: lambda: rapport_repo,
+            get_plan_repository: lambda: FakePlanRepository(),
             get_llm_client: lambda: llm,
         }
     ):
@@ -158,6 +178,9 @@ def test_get_rapport_returns_the_persisted_rapport() -> None:
                 strengths="Good pace.",
                 improvements="Add strides.",
                 generated_at=datetime(2024, 6, 1, 8, 0),
+                completed_as_planned=True,
+                perceived_effort="as_expected",
+                flag="none",
             )
         ]
     )

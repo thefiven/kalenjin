@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, time
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from kalenjin.db.models import Activity, Rapport
+from kalenjin.db.models import Activity, Objectif, Plan, Rapport, Seance
+from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
 
@@ -83,6 +84,9 @@ def _to_rapport(rapport: Rapport) -> RapportRecord:
         strengths=rapport.strengths,
         improvements=rapport.improvements,
         generated_at=rapport.generated_at,
+        completed_as_planned=rapport.completed_as_planned,
+        perceived_effort=rapport.perceived_effort,  # type: ignore[arg-type]
+        flag=rapport.flag,  # type: ignore[arg-type]
     )
 
 
@@ -100,6 +104,9 @@ class SqlAlchemyRapportRepository:
                 strengths=rapport.strengths,
                 improvements=rapport.improvements,
                 generated_at=rapport.generated_at,
+                completed_as_planned=rapport.completed_as_planned,
+                perceived_effort=rapport.perceived_effort,
+                flag=rapport.flag,
             )
             .on_conflict_do_update(
                 constraint="uq_rapports_garmin_activity_id",
@@ -107,6 +114,9 @@ class SqlAlchemyRapportRepository:
                     "strengths": rapport.strengths,
                     "improvements": rapport.improvements,
                     "generated_at": rapport.generated_at,
+                    "completed_as_planned": rapport.completed_as_planned,
+                    "perceived_effort": rapport.perceived_effort,
+                    "flag": rapport.flag,
                 },
             )
         )
@@ -116,3 +126,144 @@ class SqlAlchemyRapportRepository:
         stmt = select(Rapport).where(Rapport.garmin_activity_id == garmin_activity_id)
         rapport = self._session.execute(stmt).scalar_one_or_none()
         return None if rapport is None else _to_rapport(rapport)
+
+    def list_recent(self, limit: int) -> list[RapportRecord]:
+        stmt = select(Rapport).order_by(Rapport.generated_at.desc()).limit(limit)
+        rapports = self._session.execute(stmt).scalars().all()
+        return [_to_rapport(r) for r in rapports]
+
+
+def _to_objectif(objectif: Objectif) -> ObjectifRecord:
+    return ObjectifRecord(
+        id=objectif.id,
+        sport=objectif.sport,
+        target_distance_meters=objectif.target_distance_meters,
+        target_date=objectif.target_date,
+        target_time_seconds=objectif.target_time_seconds,
+        created_at=objectif.created_at,
+    )
+
+
+class SqlAlchemyObjectifRepository:
+    """`plan.domain.ObjectifRepository` backed by PostgreSQL via SQLAlchemy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, objectif: ObjectifRecord) -> ObjectifRecord:
+        row = Objectif(
+            sport=objectif.sport,
+            target_distance_meters=objectif.target_distance_meters,
+            target_date=objectif.target_date,
+            target_time_seconds=objectif.target_time_seconds,
+            created_at=objectif.created_at,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_objectif(row)
+
+    def get_active(self) -> ObjectifRecord | None:
+        stmt = select(Objectif).order_by(Objectif.created_at.desc(), Objectif.id.desc()).limit(1)
+        row = self._session.execute(stmt).scalar_one_or_none()
+        return None if row is None else _to_objectif(row)
+
+
+def _to_seance(seance: Seance) -> SeanceRecord:
+    return SeanceRecord(
+        id=seance.id,
+        plan_id=seance.plan_id,
+        week_start=seance.week_start,
+        phase=seance.phase,
+        detail=seance.detail,  # type: ignore[arg-type]
+        scheduled_date=seance.scheduled_date,
+        seance_type=seance.seance_type,  # type: ignore[arg-type]
+        distance_meters=seance.distance_meters,
+        theme=seance.theme,
+        week_volume_meters=seance.week_volume_meters,
+        status=seance.status,  # type: ignore[arg-type]
+        garmin_activity_id=seance.garmin_activity_id,
+    )
+
+
+def _seance_row(seance: SeanceRecord, plan_id: int) -> Seance:
+    return Seance(
+        plan_id=plan_id,
+        week_start=seance.week_start,
+        phase=seance.phase,
+        detail=seance.detail,
+        scheduled_date=seance.scheduled_date,
+        seance_type=seance.seance_type,
+        distance_meters=seance.distance_meters,
+        theme=seance.theme,
+        week_volume_meters=seance.week_volume_meters,
+        status=seance.status,
+        garmin_activity_id=seance.garmin_activity_id,
+    )
+
+
+class SqlAlchemyPlanRepository:
+    """`plan.domain.PlanRepository` backed by PostgreSQL via SQLAlchemy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, plan: PlanRecord) -> PlanRecord:
+        plan_row = Plan(objectif_id=plan.objectif_id, created_at=plan.created_at)
+        self._session.add(plan_row)
+        self._session.flush()
+
+        seance_rows = [_seance_row(s, plan_row.id) for s in plan.seances]
+        self._session.add_all(seance_rows)
+        self._session.flush()
+
+        return PlanRecord(
+            id=plan_row.id,
+            objectif_id=plan_row.objectif_id,
+            created_at=plan_row.created_at,
+            seances=[_to_seance(row) for row in seance_rows],
+        )
+
+    def get_active(self) -> PlanRecord | None:
+        plan_stmt = select(Plan).order_by(Plan.created_at.desc(), Plan.id.desc()).limit(1)
+        plan_row = self._session.execute(plan_stmt).scalar_one_or_none()
+        if plan_row is None:
+            return None
+
+        seance_stmt = (
+            select(Seance)
+            .where(Seance.plan_id == plan_row.id)
+            .order_by(Seance.week_start, Seance.scheduled_date)
+        )
+        seance_rows = self._session.execute(seance_stmt).scalars().all()
+
+        return PlanRecord(
+            id=plan_row.id,
+            objectif_id=plan_row.objectif_id,
+            created_at=plan_row.created_at,
+            seances=[_to_seance(row) for row in seance_rows],
+        )
+
+    def update_seances(self, seances: list[SeanceRecord]) -> None:
+        for seance in seances:
+            stmt = (
+                update(Seance)
+                .where(Seance.id == seance.id)
+                .values(
+                    seance_type=seance.seance_type,
+                    distance_meters=seance.distance_meters,
+                    status=seance.status,
+                    garmin_activity_id=seance.garmin_activity_id,
+                )
+            )
+            self._session.execute(stmt)
+
+    def replace_seances(
+        self, removed_seance_ids: list[int], new_seances: list[SeanceRecord]
+    ) -> list[SeanceRecord]:
+        if removed_seance_ids:
+            self._session.execute(delete(Seance).where(Seance.id.in_(removed_seance_ids)))
+
+        rows = [_seance_row(s, s.plan_id) for s in new_seances if s.plan_id is not None]
+        self._session.add_all(rows)
+        self._session.flush()
+        return [_to_seance(row) for row in rows]

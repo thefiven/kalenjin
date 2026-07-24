@@ -20,6 +20,9 @@ def _rapport(
         strengths=strengths,
         improvements=improvements,
         generated_at=generated_at,
+        completed_as_planned=True,
+        perceived_effort="as_expected",
+        flag="none",
     )
 
 
