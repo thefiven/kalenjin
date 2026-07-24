@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from kalenjin.api import (
     app,
     get_activity_repository,
+    get_activity_source,
     get_llm_client,
     get_objectif_repository,
     get_plan_repository,
@@ -233,3 +234,50 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
     updated = plan_repo.get_active().seances[0]
     assert updated.seance_type == "easy"
     assert (updated.distance_meters or 0) < 8000
+
+
+class _EmptySource:
+    def fetch_activities(self, start_date: date, end_date: date) -> list[dict]:  # type: ignore[type-arg]
+        return []
+
+
+def test_sync_marks_past_due_seances_completed_against_synced_activities() -> None:
+    past_scheduled = date.today() - timedelta(days=1)
+    activity_repo = FakeRepository(
+        existing=[
+            ActivityRecord(
+                garmin_activity_id="a1",
+                sport="running",
+                started_at=datetime.combine(past_scheduled, datetime.min.time()),
+                duration_seconds=1800.0,
+                distance_meters=5000.0,
+                average_heart_rate=150.0,
+                raw_payload={},
+            )
+        ]
+    )
+    objectif_repo = FakeObjectifRepository(existing=[_objectif()])
+    plan_repo = FakePlanRepository(
+        existing=PlanRecord(
+            id=1,
+            objectif_id=1,
+            created_at=datetime(2026, 1, 1, 8, 0),
+            seances=[_detailed_seance(1, past_scheduled)],
+        )
+    )
+
+    with overriding_dependencies(
+        {
+            get_activity_source: lambda: _EmptySource(),
+            get_activity_repository: lambda: activity_repo,
+            get_objectif_repository: lambda: objectif_repo,
+            get_plan_repository: lambda: plan_repo,
+            get_llm_client: lambda: FakeLLMClient(_week_response()),
+        }
+    ):
+        response = TestClient(app).post("/sync")
+
+    assert response.status_code == 200
+    updated = plan_repo.get_active().seances[0]
+    assert updated.status == "completed"
+    assert updated.garmin_activity_id == "a1"

@@ -21,6 +21,7 @@ from kalenjin.garmin.client import GarminActivityClient
 from kalenjin.llm.domain import LLMClient
 from kalenjin.llm.gemini_client import GeminiLLMClient
 from kalenjin.plan.adjustment import adjust_plan_for_rapport
+from kalenjin.plan.completion import match_completed_seances
 from kalenjin.plan.detailing import promote_due_weeks
 from kalenjin.plan.domain import (
     ObjectifRecord,
@@ -235,6 +236,12 @@ def trigger_sync(
     objectif = objectif_repo.get_active()
     plan = plan_repo.get_active()
     if objectif is not None and plan is not None:
+        completions = match_completed_seances(
+            plan.seances, repo.list_activities(), today=date.today()
+        )
+        if completions:
+            plan_repo.update_seances(completions)
+
         promotion = promote_due_weeks(plan.seances, objectif, llm=llm, today=date.today())
         if promotion.new_seances:
             new_seances = [replace(s, plan_id=plan.id) for s in promotion.new_seances]
