@@ -1,7 +1,7 @@
 import { updateSeanceAction } from "@/app/plan/actions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDistance } from "@/lib/format";
+import { formatDistance, formatDuration } from "@/lib/format";
 import type { Objectif, Seance, SeanceStatus } from "@/lib/types";
 
 function statusVariant(status: SeanceStatus): "default" | "secondary" | "destructive" {
@@ -67,6 +67,9 @@ export function PlanView({ objectif, seances }: { objectif: Objectif; seances: S
           <p className="text-sm">
             {objectif.sport} — {formatDistance(objectif.target_distance_meters)} by{" "}
             {objectif.target_date}
+            {objectif.target_time_seconds !== null
+              ? ` in under ${formatDuration(objectif.target_time_seconds)}`
+              : ""}
           </p>
         </CardContent>
       </Card>

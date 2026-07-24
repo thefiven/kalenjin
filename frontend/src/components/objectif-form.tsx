@@ -45,6 +45,15 @@ export function ObjectifForm() {
               className="rounded border bg-background px-2 py-1"
             />
           </label>
+          <label className="flex flex-col gap-1">
+            Target level (finish time, optional)
+            <input
+              type="time"
+              step={1}
+              name="target_time"
+              className="rounded border bg-background px-2 py-1"
+            />
+          </label>
           <Button type="submit" className="self-start">
             Create plan
           </Button>

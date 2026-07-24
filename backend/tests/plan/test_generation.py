@@ -199,7 +199,7 @@ class TestGeneratePlanSeances:
 
 
 def test_plan_generation_error_is_raised_by_the_low_level_parser_on_malformed_json() -> None:
-    from kalenjin.plan.generation import _parse_and_validate_sessions
+    from kalenjin.plan.generation import _parse_and_validate_seances
     from kalenjin.plan.periodization import Phase, WeekTarget
 
     week = WeekTarget(
@@ -212,4 +212,4 @@ def test_plan_generation_error_is_raised_by_the_low_level_parser_on_malformed_js
     )
 
     with pytest.raises(PlanGenerationError):
-        _parse_and_validate_sessions("not json", week)
+        _parse_and_validate_seances("not json", week)

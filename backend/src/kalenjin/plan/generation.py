@@ -15,11 +15,11 @@ MIN_HARD_SEANCE_GAP_DAYS = 2
 VOLUME_TOLERANCE = 0.15
 DEFAULT_STARTING_WEEKLY_VOLUME_METERS = 15_000.0
 
-_ALL_SESSION_TYPES = frozenset({"easy", "long_run", "tempo", "interval", "rest"})
+_ALL_SEANCE_TYPES = frozenset({"easy", "long_run", "tempo", "interval", "rest"})
 
 
 class PlanGenerationError(Exception):
-    """Raised when the LLM's response can't be parsed into valid weekly sessions."""
+    """Raised when the LLM's response can't be parsed into valid weekly séances."""
 
 
 def estimate_current_weekly_volume(
@@ -49,7 +49,7 @@ def _strip_code_fences(response: str) -> str:
     return text
 
 
-def _parse_and_validate_sessions(response: str, week: WeekTarget) -> list[dict[str, Any]]:
+def _parse_and_validate_seances(response: str, week: WeekTarget) -> list[dict[str, Any]]:
     try:
         payload = json.loads(_strip_code_fences(response))
     except json.JSONDecodeError as exc:
@@ -61,14 +61,14 @@ def _parse_and_validate_sessions(response: str, week: WeekTarget) -> list[dict[s
     seen_day_offsets: set[int] = set()
     hard_day_offsets: list[int] = []
     total_distance = 0.0
-    sessions: list[dict[str, Any]] = []
+    seances: list[dict[str, Any]] = []
 
     for entry in payload:
         if not isinstance(entry, dict):
-            raise PlanGenerationError(f"session entry was not an object: {entry!r}")
+            raise PlanGenerationError(f"seance entry was not an object: {entry!r}")
 
         day_offset = entry.get("day_offset")
-        session_type = entry.get("type")
+        seance_type = entry.get("type")
         distance_meters = entry.get("distance_meters")
 
         if (
@@ -79,25 +79,25 @@ def _parse_and_validate_sessions(response: str, week: WeekTarget) -> list[dict[s
             raise PlanGenerationError(f"invalid day_offset: {entry!r}")
         if day_offset in seen_day_offsets:
             raise PlanGenerationError(f"duplicate day_offset: {entry!r}")
-        if session_type not in _ALL_SESSION_TYPES:
-            raise PlanGenerationError(f"unknown session type: {entry!r}")
+        if seance_type not in _ALL_SEANCE_TYPES:
+            raise PlanGenerationError(f"unknown seance type: {entry!r}")
         if (
             not isinstance(distance_meters, int | float)
             or isinstance(distance_meters, bool)
             or distance_meters < 0
         ):
             raise PlanGenerationError(f"invalid distance_meters: {entry!r}")
-        if session_type == "long_run" and distance_meters > week.long_run_cap_meters + 1e-6:
+        if seance_type == "long_run" and distance_meters > week.long_run_cap_meters + 1e-6:
             raise PlanGenerationError(f"long run exceeds the cap: {entry!r}")
 
         seen_day_offsets.add(day_offset)
-        if session_type in HARD_SEANCE_TYPES:
+        if seance_type in HARD_SEANCE_TYPES:
             hard_day_offsets.append(day_offset)
         total_distance += distance_meters
-        sessions.append(
+        seances.append(
             {
                 "day_offset": day_offset,
-                "type": session_type,
+                "type": seance_type,
                 "distance_meters": float(distance_meters),
             }
         )
@@ -106,7 +106,7 @@ def _parse_and_validate_sessions(response: str, week: WeekTarget) -> list[dict[s
     for earlier, later in pairwise(hard_day_offsets):
         if later - earlier < MIN_HARD_SEANCE_GAP_DAYS:
             raise PlanGenerationError(
-                f"hard sessions scheduled too close together: {hard_day_offsets!r}"
+                f"hard seances scheduled too close together: {hard_day_offsets!r}"
             )
 
     lower = week.target_volume_meters * (1 - VOLUME_TOLERANCE)
@@ -116,10 +116,10 @@ def _parse_and_validate_sessions(response: str, week: WeekTarget) -> list[dict[s
             f"week total distance {total_distance} is outside tolerance of {week.target_volume_meters}"
         )
 
-    return sessions
+    return seances
 
 
-def _fallback_sessions(week: WeekTarget) -> list[dict[str, Any]]:
+def _fallback_seances(week: WeekTarget) -> list[dict[str, Any]]:
     """A deterministic template that satisfies the same hard constraints by construction."""
     long_run = min(week.target_volume_meters * 0.3, week.long_run_cap_meters)
     remaining = week.target_volume_meters - long_run
@@ -151,19 +151,19 @@ def _build_week_prompt(week: WeekTarget, objectif: ObjectifRecord) -> str:
         f"Sport: {objectif.sport}. Week phase: {week.phase.value}. "
         f"Target total distance for the week: {round(week.target_volume_meters)}m. "
         f"Long run must not exceed {round(week.long_run_cap_meters)}m. "
-        "Respond with a single JSON array of session objects, each with exactly three keys: "
+        "Respond with a single JSON array of seance objects, each with exactly three keys: "
         '"day_offset" (integer 0-6, Monday=0, no duplicates), '
         '"type" (one of "easy", "long_run", "tempo", "interval", "rest"), '
         '"distance_meters" (number, 0 for rest days). '
-        "Include at most one tempo/interval session, and if you include one, do not "
-        "place it within 2 days of another hard session. "
+        "Include at most one tempo/interval seance, and if you include one, do not "
+        "place it within 2 days of another hard seance. "
         "The sum of all non-rest distance_meters should be close to the week's target total. "
         "Do not include anything other than the JSON array."
     )
 
 
 def _week_seances(
-    week: WeekTarget, objectif: ObjectifRecord, sessions: list[dict[str, Any]]
+    week: WeekTarget, objectif: ObjectifRecord, seances: list[dict[str, Any]]
 ) -> list[SeanceRecord]:
     return [
         SeanceRecord(
@@ -172,16 +172,16 @@ def _week_seances(
             week_start=week.week_start,
             phase=week.phase.value,
             detail="detailed",
-            scheduled_date=week.week_start + timedelta(days=int(session["day_offset"])),
-            seance_type=session["type"],
-            distance_meters=session["distance_meters"],
+            scheduled_date=week.week_start + timedelta(days=int(seance["day_offset"])),
+            seance_type=seance["type"],
+            distance_meters=seance["distance_meters"],
             theme=None,
             week_volume_meters=week.target_volume_meters,
             status="pending",
             garmin_activity_id=None,
         )
-        for session in sessions
-        if session["type"] != "rest"
+        for seance in seances
+        if seance["type"] != "rest"
     ]
 
 
@@ -193,10 +193,10 @@ def detail_week(week: WeekTarget, objectif: ObjectifRecord, llm: LLMClient) -> l
     """
     response = llm.generate(_build_week_prompt(week, objectif))
     try:
-        sessions = _parse_and_validate_sessions(response, week)
+        seances = _parse_and_validate_seances(response, week)
     except PlanGenerationError:
-        sessions = _fallback_sessions(week)
-    return _week_seances(week, objectif, sessions)
+        seances = _fallback_seances(week)
+    return _week_seances(week, objectif, seances)
 
 
 def _coarse_seance(week: WeekTarget) -> SeanceRecord:

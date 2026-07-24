@@ -4,9 +4,11 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date, datetime
 from functools import lru_cache
+from typing import NamedTuple
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from kalenjin.cli import prompt_mfa_via_console
 from kalenjin.config.settings import Settings
@@ -58,50 +60,49 @@ def get_activity_source() -> ActivitySource:
     return client
 
 
-def get_activity_repository() -> Iterator[ActivityRepository]:
+def _get_db_session() -> Iterator[Session]:
     settings = get_settings()
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
     with session_scope(session_factory) as session:
-        yield SqlAlchemyActivityRepository(session)
+        yield session
 
 
-def get_rapport_repository() -> Iterator[RapportRepository]:
-    settings = get_settings()
-    engine = make_engine(settings.database_url)
-    session_factory = make_session_factory(engine)
-    with session_scope(session_factory) as session:
-        yield SqlAlchemyRapportRepository(session)
+def get_activity_repository(
+    session: Session = Depends(_get_db_session),
+) -> ActivityRepository:
+    return SqlAlchemyActivityRepository(session)
 
 
-def get_objectif_repository() -> Iterator[ObjectifRepository]:
-    settings = get_settings()
-    engine = make_engine(settings.database_url)
-    session_factory = make_session_factory(engine)
-    with session_scope(session_factory) as session:
-        yield SqlAlchemyObjectifRepository(session)
+def get_rapport_repository(session: Session = Depends(_get_db_session)) -> RapportRepository:
+    return SqlAlchemyRapportRepository(session)
 
 
-def get_plan_repository() -> Iterator[PlanRepository]:
-    settings = get_settings()
-    engine = make_engine(settings.database_url)
-    session_factory = make_session_factory(engine)
-    with session_scope(session_factory) as session:
-        yield SqlAlchemyPlanRepository(session)
+def get_objectif_repository(session: Session = Depends(_get_db_session)) -> ObjectifRepository:
+    return SqlAlchemyObjectifRepository(session)
 
 
-def get_objectif_and_plan_repositories() -> Iterator[tuple[ObjectifRepository, PlanRepository]]:
+def get_plan_repository(session: Session = Depends(_get_db_session)) -> PlanRepository:
+    return SqlAlchemyPlanRepository(session)
+
+
+class ObjectifAndPlanRepositories(NamedTuple):
+    objectif: ObjectifRepository
+    plan: PlanRepository
+
+
+def get_objectif_and_plan_repositories(
+    session: Session = Depends(_get_db_session),
+) -> ObjectifAndPlanRepositories:
     """A single shared session for objectif+plan writes in the same request.
 
     Separate `Depends(get_objectif_repository)`/`Depends(get_plan_repository)` each open
     their own connection — a plan referencing an objectif created moments earlier in a
     different, not-yet-committed session would fail its foreign key check.
     """
-    settings = get_settings()
-    engine = make_engine(settings.database_url)
-    session_factory = make_session_factory(engine)
-    with session_scope(session_factory) as session:
-        yield SqlAlchemyObjectifRepository(session), SqlAlchemyPlanRepository(session)
+    return ObjectifAndPlanRepositories(
+        SqlAlchemyObjectifRepository(session), SqlAlchemyPlanRepository(session)
+    )
 
 
 def get_llm_client() -> LLMClient:
@@ -328,7 +329,7 @@ def get_activity_rapport(
 def create_objectif(
     body: ObjectifRequest,
     activity_repo: ActivityRepository = Depends(get_activity_repository),
-    repos: tuple[ObjectifRepository, PlanRepository] = Depends(get_objectif_and_plan_repositories),
+    repos: ObjectifAndPlanRepositories = Depends(get_objectif_and_plan_repositories),
     llm: LLMClient = Depends(get_llm_client),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
