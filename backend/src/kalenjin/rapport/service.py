@@ -15,7 +15,9 @@ class RapportGenerationError(Exception):
     """Raised when the LLM's response can't be parsed into a rapport."""
 
 
-def select_history(activity: ActivityRecord, activities: list[ActivityRecord]) -> list[ActivityRecord]:
+def select_history(
+    activity: ActivityRecord, activities: list[ActivityRecord]
+) -> list[ActivityRecord]:
     """The most recent activities before `activity`, for comparison context.
 
     `activities` is expected most-recent-first (as `ActivityRepository.list_activities` returns).
@@ -67,9 +69,7 @@ def generate_rapport(
     if not isinstance(payload, dict) or not all(
         isinstance(payload.get(key), str) for key in _REQUIRED_KEYS
     ):
-        raise RapportGenerationError(
-            f"LLM response is missing required string keys: {response!r}"
-        )
+        raise RapportGenerationError(f"LLM response is missing required string keys: {response!r}")
 
     return RapportRecord(
         garmin_activity_id=activity.garmin_activity_id,

@@ -101,9 +101,7 @@ def test_select_history_excludes_the_activity_itself() -> None:
 
 def test_select_history_caps_at_the_history_size() -> None:
     activity = _activity("0", datetime(2024, 6, 10, 7, 30))
-    activities = [activity] + [
-        _activity(str(i), datetime(2024, 6, i, 7, 30)) for i in range(1, 8)
-    ]
+    activities = [activity] + [_activity(str(i), datetime(2024, 6, i, 7, 30)) for i in range(1, 8)]
 
     history = select_history(activity, activities)
 
