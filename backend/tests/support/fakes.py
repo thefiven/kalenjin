@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from kalenjin.sync.domain import ActivityRecord
+from kalenjin.sync.domain import ActivityRecord, DateRange
 
 
 class FakeSource:
@@ -40,14 +40,12 @@ class FakeRepository:
             self._existing[activity.garmin_activity_id] = activity
         return inserted
 
-    def list_activities(
-        self, since: date | None = None, until: date | None = None
-    ) -> list[ActivityRecord]:
+    def list_activities(self, date_range: DateRange = DateRange()) -> list[ActivityRecord]:
         activities = self._existing.values()
-        if since is not None:
-            activities = (a for a in activities if a.started_at.date() >= since)
-        if until is not None:
-            activities = (a for a in activities if a.started_at.date() <= until)
+        if date_range.since is not None:
+            activities = (a for a in activities if a.started_at.date() >= date_range.since)
+        if date_range.until is not None:
+            activities = (a for a in activities if a.started_at.date() <= date_range.until)
         return sorted(activities, key=lambda a: a.started_at, reverse=True)
 
     def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None:

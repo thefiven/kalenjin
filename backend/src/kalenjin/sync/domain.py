@@ -6,6 +6,12 @@ from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
+class DateRange:
+    since: date | None = None
+    until: date | None = None
+
+
+@dataclass(frozen=True)
 class ActivityRecord:
     """A parsed Garmin activity, ready to persist. See CONTEXT.md's `Séance` term."""
 
@@ -38,10 +44,8 @@ class ActivityRepository(Protocol):
         """
         ...
 
-    def list_activities(
-        self, since: date | None = None, until: date | None = None
-    ) -> list[ActivityRecord]:
-        """All activities whose start date falls within [since, until], most recent first."""
+    def list_activities(self, date_range: DateRange = DateRange()) -> list[ActivityRecord]:
+        """All activities whose start date falls within date_range, most recent first."""
         ...
 
     def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None: ...

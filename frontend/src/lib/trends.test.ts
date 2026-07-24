@@ -1,18 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { groupBySport, weeklyDistance } from "@/lib/trends";
-import type { Activity } from "@/lib/types";
-
-function activity(overrides: Partial<Activity> = {}): Activity {
-  return {
-    garmin_activity_id: "1",
-    sport: "running",
-    started_at: "2024-06-05T07:30:00",
-    duration_seconds: 1800,
-    distance_meters: 5000,
-    average_heart_rate: 150,
-    ...overrides,
-  };
-}
+import { groupBySport, recentPaceBySport, weeklyDistance } from "@/lib/trends";
+import { activity } from "@/test-support/fixtures";
 
 describe("groupBySport", () => {
   it("counts sessions and sums distance per sport", () => {
@@ -51,5 +39,66 @@ describe("weeklyDistance", () => {
       { week: "2024-W24", totalDistanceMeters: 8000 },
       { week: "2024-W23", totalDistanceMeters: 8000 },
     ]);
+  });
+});
+
+describe("recentPaceBySport", () => {
+  it("returns the N most recent sessions per sport, oldest first, with pace in seconds/km", () => {
+    const activities = [
+      activity({
+        garmin_activity_id: "1",
+        sport: "running",
+        started_at: "2024-06-01T07:00:00",
+        distance_meters: 5000,
+        duration_seconds: 1500, // 5 min/km
+      }),
+      activity({
+        garmin_activity_id: "2",
+        sport: "running",
+        started_at: "2024-06-03T07:00:00",
+        distance_meters: 5000,
+        duration_seconds: 1400,
+      }),
+      activity({
+        garmin_activity_id: "3",
+        sport: "cycling",
+        started_at: "2024-06-02T07:00:00",
+        distance_meters: 20000,
+        duration_seconds: 3600,
+      }),
+    ];
+
+    const result = recentPaceBySport(activities, 5);
+
+    expect(result).toEqual({
+      running: [
+        { startedAt: "2024-06-01T07:00:00", paceSecondsPerKm: 300 },
+        { startedAt: "2024-06-03T07:00:00", paceSecondsPerKm: 280 },
+      ],
+      cycling: [{ startedAt: "2024-06-02T07:00:00", paceSecondsPerKm: 180 }],
+    });
+  });
+
+  it("caps the number of sessions per sport at the given limit, keeping the most recent", () => {
+    const activities = [
+      activity({ garmin_activity_id: "1", started_at: "2024-06-01T07:00:00" }),
+      activity({ garmin_activity_id: "2", started_at: "2024-06-02T07:00:00" }),
+      activity({ garmin_activity_id: "3", started_at: "2024-06-03T07:00:00" }),
+    ];
+
+    const result = recentPaceBySport(activities, 2);
+
+    expect(result.running.map((p) => p.startedAt)).toEqual([
+      "2024-06-02T07:00:00",
+      "2024-06-03T07:00:00",
+    ]);
+  });
+
+  it("skips sessions with no distance, since pace can't be computed", () => {
+    const activities = [activity({ garmin_activity_id: "1", distance_meters: null })];
+
+    const result = recentPaceBySport(activities, 5);
+
+    expect(result).toEqual({});
   });
 });

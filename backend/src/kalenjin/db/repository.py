@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime, time
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from kalenjin.db.models import Activity
-from kalenjin.sync.domain import ActivityRecord
+from kalenjin.sync.domain import ActivityRecord, DateRange
 
 
 def _to_record(activity: Activity) -> ActivityRecord:
@@ -60,14 +60,12 @@ class SqlAlchemyActivityRepository:
 
         return inserted
 
-    def list_activities(
-        self, since: date | None = None, until: date | None = None
-    ) -> list[ActivityRecord]:
+    def list_activities(self, date_range: DateRange = DateRange()) -> list[ActivityRecord]:
         stmt = select(Activity).order_by(Activity.started_at.desc())
-        if since is not None:
-            stmt = stmt.where(Activity.started_at >= datetime.combine(since, time.min))
-        if until is not None:
-            stmt = stmt.where(Activity.started_at <= datetime.combine(until, time.max))
+        if date_range.since is not None:
+            stmt = stmt.where(Activity.started_at >= datetime.combine(date_range.since, time.min))
+        if date_range.until is not None:
+            stmt = stmt.where(Activity.started_at <= datetime.combine(date_range.until, time.max))
 
         activities = self._session.execute(stmt).scalars().all()
         return [_to_record(activity) for activity in activities]

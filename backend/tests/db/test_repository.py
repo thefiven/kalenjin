@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from kalenjin.db.repository import SqlAlchemyActivityRepository
-from kalenjin.sync.domain import ActivityRecord
+from kalenjin.sync.domain import ActivityRecord, DateRange
 
 pytestmark = pytest.mark.integration
 
@@ -81,7 +81,7 @@ def test_list_activities_filters_by_since_and_until(db_session: Session) -> None
         ]
     )
 
-    activities = repo.list_activities(since=date(2024, 6, 1), until=date(2024, 6, 30))
+    activities = repo.list_activities(DateRange(since=date(2024, 6, 1), until=date(2024, 6, 30)))
 
     assert [a.garmin_activity_id for a in activities] == ["2"]
 

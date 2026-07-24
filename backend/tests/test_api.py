@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kalenjin.api import app, get_activity_repository, get_activity_source
 from kalenjin.sync.domain import ActivityRecord
+from support.api_client import overriding_dependencies
 from support.fakes import FakeRepository, raw_activity
 
 
@@ -32,13 +33,10 @@ def test_sync_endpoint_reports_the_number_of_imported_activities() -> None:
     source = _AnyRangeSource([raw_activity("1")])
     repo = FakeRepository()
 
-    app.dependency_overrides[get_activity_source] = lambda: source
-    app.dependency_overrides[get_activity_repository] = lambda: repo
-    try:
-        client = TestClient(app)
-        response = client.post("/sync")
-    finally:
-        app.dependency_overrides.clear()
+    with overriding_dependencies(
+        {get_activity_source: lambda: source, get_activity_repository: lambda: repo}
+    ):
+        response = TestClient(app).post("/sync")
 
     assert response.status_code == 200
     assert response.json() == {"imported_count": 1}
@@ -63,12 +61,8 @@ def test_list_activities_returns_activities_most_recent_first() -> None:
             _record("2", datetime(2024, 6, 5, 7, 0)),
         ]
     )
-    app.dependency_overrides[get_activity_repository] = lambda: repo
-    try:
-        client = TestClient(app)
-        response = client.get("/activities")
-    finally:
-        app.dependency_overrides.clear()
+    with overriding_dependencies({get_activity_repository: lambda: repo}):
+        response = TestClient(app).get("/activities")
 
     assert response.status_code == 200
     body = response.json()
@@ -82,12 +76,8 @@ def test_list_activities_filters_by_date_range() -> None:
             _record("2", datetime(2024, 6, 5, 7, 0)),
         ]
     )
-    app.dependency_overrides[get_activity_repository] = lambda: repo
-    try:
-        client = TestClient(app)
-        response = client.get("/activities", params={"since": "2024-06-01"})
-    finally:
-        app.dependency_overrides.clear()
+    with overriding_dependencies({get_activity_repository: lambda: repo}):
+        response = TestClient(app).get("/activities", params={"since": "2024-06-01"})
 
     assert response.status_code == 200
     body = response.json()
@@ -96,12 +86,8 @@ def test_list_activities_filters_by_date_range() -> None:
 
 def test_get_activity_by_id_returns_its_detail() -> None:
     repo = FakeRepository(existing=[_record("42", datetime(2024, 6, 1, 7, 0), sport="cycling")])
-    app.dependency_overrides[get_activity_repository] = lambda: repo
-    try:
-        client = TestClient(app)
-        response = client.get("/activities/42")
-    finally:
-        app.dependency_overrides.clear()
+    with overriding_dependencies({get_activity_repository: lambda: repo}):
+        response = TestClient(app).get("/activities/42")
 
     assert response.status_code == 200
     body = response.json()
@@ -112,11 +98,7 @@ def test_get_activity_by_id_returns_its_detail() -> None:
 
 def test_get_activity_by_id_returns_404_when_missing() -> None:
     repo = FakeRepository()
-    app.dependency_overrides[get_activity_repository] = lambda: repo
-    try:
-        client = TestClient(app)
-        response = client.get("/activities/does-not-exist")
-    finally:
-        app.dependency_overrides.clear()
+    with overriding_dependencies({get_activity_repository: lambda: repo}):
+        response = TestClient(app).get("/activities/does-not-exist")
 
     assert response.status_code == 404

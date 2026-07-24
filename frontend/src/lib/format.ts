@@ -16,3 +16,9 @@ export function formatDistance(meters: number | null): string {
   if (meters === null) return "—";
   return `${(meters / 1000).toFixed(2)} km`;
 }
+
+export function formatPace(secondsPerKm: number): string {
+  const minutes = Math.floor(secondsPerKm / 60);
+  const seconds = Math.round(secondsPerKm % 60);
+  return `${minutes}:${seconds.toString().padStart(2, "0")} /km`;
+}

@@ -12,7 +12,7 @@ from kalenjin.config.settings import Settings
 from kalenjin.db.repository import SqlAlchemyActivityRepository
 from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
-from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource
+from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource, DateRange
 from kalenjin.sync.service import sync_activities
 
 app = FastAPI(title="Kalenjin")
@@ -87,7 +87,7 @@ def list_activities(
     until: date | None = None,
     repo: ActivityRepository = Depends(get_activity_repository),
 ) -> list[ActivityResponse]:
-    activities = repo.list_activities(since=since, until=until)
+    activities = repo.list_activities(DateRange(since=since, until=until))
     return [_to_response(a) for a in activities]
 
 

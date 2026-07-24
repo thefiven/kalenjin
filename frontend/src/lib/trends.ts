@@ -37,6 +37,36 @@ export function weeklyDistance(activities: Activity[]): WeeklyDistance[] {
     .map(([week, totalDistanceMeters]) => ({ week, totalDistanceMeters }));
 }
 
+export interface PacePoint {
+  startedAt: string;
+  paceSecondsPerKm: number;
+}
+
+export function recentPaceBySport(
+  activities: Activity[],
+  limit: number,
+): Record<string, PacePoint[]> {
+  const bySport: Record<string, PacePoint[]> = {};
+
+  const withPace = activities
+    .filter((a): a is Activity & { distance_meters: number } => (a.distance_meters ?? 0) > 0)
+    .sort((a, b) => (a.started_at < b.started_at ? -1 : 1));
+
+  for (const a of withPace) {
+    const points = (bySport[a.sport] ??= []);
+    points.push({
+      startedAt: a.started_at,
+      paceSecondsPerKm: a.duration_seconds / (a.distance_meters / 1000),
+    });
+  }
+
+  for (const sport of Object.keys(bySport)) {
+    bySport[sport] = bySport[sport].slice(-limit);
+  }
+
+  return bySport;
+}
+
 function isoWeekKey(date: Date): string {
   const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNumber = utcDate.getUTCDay() || 7;

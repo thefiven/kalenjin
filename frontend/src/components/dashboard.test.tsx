@@ -1,19 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Dashboard } from "@/components/dashboard";
-import type { Activity } from "@/lib/types";
-
-function activity(overrides: Partial<Activity> = {}): Activity {
-  return {
-    garmin_activity_id: "1",
-    sport: "running",
-    started_at: "2024-06-05T07:30:00",
-    duration_seconds: 1800,
-    distance_meters: 5000,
-    average_heart_rate: 150,
-    ...overrides,
-  };
-}
+import { activity } from "@/test-support/fixtures";
 
 describe("Dashboard", () => {
   it("renders all four trend categories", () => {
@@ -51,5 +39,37 @@ describe("Dashboard", () => {
 
     expect(screen.getByText("running")).toBeInTheDocument();
     expect(screen.getByText("cycling")).toBeInTheDocument();
+  });
+
+  it("does not claim to show VO2max/critical pace/training load, which aren't tracked", () => {
+    render(<Dashboard activities={[activity()]} />);
+
+    expect(screen.getByText(/aren't tracked yet/i)).toBeInTheDocument();
+  });
+
+  it("shows a recent pace trend per sport in the progression section", () => {
+    render(
+      <Dashboard
+        activities={[
+          activity({
+            garmin_activity_id: "1",
+            sport: "running",
+            started_at: "2024-06-01T07:00:00",
+            distance_meters: 5000,
+            duration_seconds: 1500,
+          }),
+          activity({
+            garmin_activity_id: "2",
+            sport: "running",
+            started_at: "2024-06-03T07:00:00",
+            distance_meters: 5000,
+            duration_seconds: 1400,
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("5:00 /km")).toBeInTheDocument();
+    expect(screen.getByText("4:40 /km")).toBeInTheDocument();
   });
 });
