@@ -41,6 +41,9 @@ export default function RootLayout({
               <Link href="/dashboard" className="font-medium hover:underline">
                 Dashboard
               </Link>
+              <Link href="/plan" className="font-medium hover:underline">
+                Plan
+              </Link>
             </div>
             <ThemeToggle />
           </nav>

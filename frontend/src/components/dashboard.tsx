@@ -1,7 +1,8 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { planAdherence } from "@/lib/adherence";
 import { formatDistance, formatPace } from "@/lib/format";
 import { groupBySport, recentPaceBySport, weeklyDistance } from "@/lib/trends";
-import type { Activity } from "@/lib/types";
+import type { Activity, Seance } from "@/lib/types";
 
 const RECENT_SESSIONS_PER_SPORT = 5;
 
@@ -31,10 +32,17 @@ function Placeholder({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-muted-foreground">{children}</p>;
 }
 
-export function Dashboard({ activities }: { activities: Activity[] }) {
+export function Dashboard({
+  activities,
+  planSeances = null,
+}: {
+  activities: Activity[];
+  planSeances?: Seance[] | null;
+}) {
   const bySport = groupBySport(activities);
   const byWeek = weeklyDistance(activities);
   const recentPace = recentPaceBySport(activities, RECENT_SESSIONS_PER_SPORT);
+  const adherence = planSeances === null ? null : planAdherence(planSeances);
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -92,7 +100,16 @@ export function Dashboard({ activities }: { activities: Activity[] }) {
       </Section>
 
       <Section title="Plan adherence">
-        <Placeholder>No training plan yet.</Placeholder>
+        {planSeances === null ? (
+          <Placeholder>No training plan yet.</Placeholder>
+        ) : adherence === null ? (
+          <Placeholder>No planned session is due yet.</Placeholder>
+        ) : (
+          <p className="text-sm">
+            {adherence.completedCount}/{adherence.totalCount} planned sessions completed (
+            {Math.round(adherence.ratio * 100)}%)
+          </p>
+        )}
       </Section>
     </div>
   );

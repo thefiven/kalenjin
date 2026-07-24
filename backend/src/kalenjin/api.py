@@ -90,6 +90,20 @@ def get_plan_repository() -> Iterator[PlanRepository]:
         yield SqlAlchemyPlanRepository(session)
 
 
+def get_objectif_and_plan_repositories() -> Iterator[tuple[ObjectifRepository, PlanRepository]]:
+    """A single shared session for objectif+plan writes in the same request.
+
+    Separate `Depends(get_objectif_repository)`/`Depends(get_plan_repository)` each open
+    their own connection — a plan referencing an objectif created moments earlier in a
+    different, not-yet-committed session would fail its foreign key check.
+    """
+    settings = get_settings()
+    engine = make_engine(settings.database_url)
+    session_factory = make_session_factory(engine)
+    with session_scope(session_factory) as session:
+        yield SqlAlchemyObjectifRepository(session), SqlAlchemyPlanRepository(session)
+
+
 def get_llm_client() -> LLMClient:
     return GeminiLLMClient(api_key=get_settings().gemini_api_key)
 
@@ -314,11 +328,11 @@ def get_activity_rapport(
 def create_objectif(
     body: ObjectifRequest,
     activity_repo: ActivityRepository = Depends(get_activity_repository),
-    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-    plan_repo: PlanRepository = Depends(get_plan_repository),
+    repos: tuple[ObjectifRepository, PlanRepository] = Depends(get_objectif_and_plan_repositories),
     llm: LLMClient = Depends(get_llm_client),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
+    objectif_repo, plan_repo = repos
     today = date.today()
     objectif = objectif_repo.save(
         ObjectifRecord(

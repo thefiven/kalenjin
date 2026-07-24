@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Dashboard } from "@/components/dashboard";
-import { activity } from "@/test-support/fixtures";
+import { activity, seance } from "@/test-support/fixtures";
 
 describe("Dashboard", () => {
   it("renders all four trend categories", () => {
@@ -25,6 +25,26 @@ describe("Dashboard", () => {
     render(<Dashboard activities={[activity()]} />);
 
     expect(screen.getByText(/no training plan/i)).toBeInTheDocument();
+  });
+
+  it("shows a placeholder when a plan exists but no session is due yet", () => {
+    render(<Dashboard activities={[activity()]} planSeances={[seance({ status: "pending" })]} />);
+
+    expect(screen.getByText(/no planned session is due/i)).toBeInTheDocument();
+  });
+
+  it("shows the real completed-vs-total ratio once sessions are resolved", () => {
+    render(
+      <Dashboard
+        activities={[activity()]}
+        planSeances={[
+          seance({ id: 1, status: "completed" }),
+          seance({ id: 2, status: "skipped" }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/1\/2 planned sessions completed \(50%\)/i)).toBeInTheDocument();
   });
 
   it("shows per-sport totals in the progression section", () => {
