@@ -8,7 +8,7 @@ class GeminiLLMClient:
     No Gemini-specific type leaves this module; callers only see `generate`.
     """
 
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-flash-latest") -> None:
         self._client = genai.Client(api_key=api_key)
         self._model = model
 
