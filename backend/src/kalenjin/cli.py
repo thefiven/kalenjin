@@ -12,6 +12,10 @@ from kalenjin.sync.service import sync_activities
 logger = logging.getLogger(__name__)
 
 
+def prompt_mfa_via_console() -> str:
+    return input("Garmin MFA code: ")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
@@ -21,6 +25,7 @@ def main() -> None:
         email=settings.garmin_email,
         password=settings.garmin_password,
         tokenstore=settings.garmin_tokenstore,
+        prompt_mfa=prompt_mfa_via_console,
     )
     source.login()
 
