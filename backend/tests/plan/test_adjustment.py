@@ -29,6 +29,7 @@ def _seance(
         week_volume_meters=week_volume_meters,
         status=status,  # type: ignore[arg-type]
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 

@@ -138,7 +138,9 @@ def test_generate_rapport_creates_and_persists_a_rapport() -> None:
         {
             get_activity_repository: lambda: activity_repo,
             get_rapport_repository: lambda: rapport_repo,
+            get_objectif_repository: lambda: FakeObjectifRepository(),
             get_plan_repository: lambda: FakePlanRepository(),
+            get_activity_source: lambda: _AnyRangeSource([]),
             get_llm_client: lambda: llm,
         }
     ):
@@ -161,7 +163,9 @@ def test_generate_rapport_returns_404_when_activity_is_missing() -> None:
         {
             get_activity_repository: lambda: activity_repo,
             get_rapport_repository: lambda: rapport_repo,
+            get_objectif_repository: lambda: FakeObjectifRepository(),
             get_plan_repository: lambda: FakePlanRepository(),
+            get_activity_source: lambda: _AnyRangeSource([]),
             get_llm_client: lambda: llm,
         }
     ):

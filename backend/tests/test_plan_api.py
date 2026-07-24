@@ -17,6 +17,7 @@ from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
 from support.fakes import (
+    FakeGarminPushClient,
     FakeLLMClient,
     FakeObjectifRepository,
     FakePlanRepository,
@@ -64,6 +65,7 @@ def _detailed_seance(
         week_volume_meters=20_000,
         status=status,
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -81,6 +83,7 @@ def _coarse_seance(id: int, week_start: date) -> SeanceRecord:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -218,6 +221,7 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
         '{"strengths": "x", "improvements": "y", "completed_as_planned": false, '
         '"perceived_effort": "high", "flag": "pain"}'
     )
+    garmin = FakeGarminPushClient()
 
     with overriding_dependencies(
         {
@@ -225,6 +229,7 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
             get_rapport_repository: lambda: rapport_repo,
             get_objectif_repository: lambda: objectif_repo,
             get_plan_repository: lambda: plan_repo,
+            get_activity_source: lambda: garmin,
             get_llm_client: lambda: llm,
         }
     ):
@@ -234,6 +239,8 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
     updated = plan_repo.get_active().seances[0]
     assert updated.seance_type == "easy"
     assert (updated.distance_meters or 0) < 8000
+    assert len(garmin.pushed) == 1
+    assert updated.garmin_workout_id == "workout-1"
 
 
 class _EmptySource:

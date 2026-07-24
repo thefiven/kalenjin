@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date, datetime
 from functools import lru_cache
-from typing import NamedTuple
+from typing import NamedTuple, cast
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -26,6 +26,7 @@ from kalenjin.plan.adjustment import adjust_plan_for_rapport
 from kalenjin.plan.completion import match_completed_seances
 from kalenjin.plan.detailing import promote_due_weeks
 from kalenjin.plan.domain import (
+    GarminPushClient,
     ObjectifRecord,
     ObjectifRepository,
     PlanRecord,
@@ -33,6 +34,7 @@ from kalenjin.plan.domain import (
     SeanceRecord,
 )
 from kalenjin.plan.generation import estimate_current_weekly_volume, generate_plan_seances
+from kalenjin.plan.push import sync_plan_to_garmin
 from kalenjin.rapport.domain import RapportRecord, RapportRepository
 from kalenjin.rapport.service import generate_rapport, select_history
 from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource, DateRange
@@ -103,6 +105,18 @@ def get_objectif_and_plan_repositories(
     return ObjectifAndPlanRepositories(
         SqlAlchemyObjectifRepository(session), SqlAlchemyPlanRepository(session)
     )
+
+
+def get_garmin_push_client(
+    source: ActivitySource = Depends(get_activity_source),
+) -> GarminPushClient:
+    """The same logged-in `GarminActivityClient` as `get_activity_source`, retyped.
+
+    Depending on `get_activity_source` (rather than constructing a second client) lets
+    FastAPI's per-request dependency caching reuse the one already-authenticated
+    session instead of logging in twice — see issue #5's "reuse the auth from #1".
+    """
+    return cast(GarminPushClient, source)
 
 
 def get_llm_client() -> LLMClient:
@@ -193,6 +207,7 @@ class SeanceResponse(BaseModel):
     week_volume_meters: float
     status: str
     garmin_activity_id: str | None
+    garmin_workout_id: str | None
 
 
 def _to_seance_response(seance: SeanceRecord) -> SeanceResponse:
@@ -209,6 +224,7 @@ def _to_seance_response(seance: SeanceRecord) -> SeanceResponse:
         week_volume_meters=seance.week_volume_meters,
         status=seance.status,
         garmin_activity_id=seance.garmin_activity_id,
+        garmin_workout_id=seance.garmin_workout_id,
     )
 
 
@@ -244,6 +260,7 @@ def trigger_sync(
     repo: ActivityRepository = Depends(get_activity_repository),
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
+    garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
 ) -> SyncResponse:
     result = sync_activities(source, repo, today=date.today())
@@ -251,16 +268,24 @@ def trigger_sync(
     objectif = objectif_repo.get_active()
     plan = plan_repo.get_active()
     if objectif is not None and plan is not None:
-        completions = match_completed_seances(
-            plan.seances, repo.list_activities(), today=date.today()
-        )
+        today = date.today()
+
+        completions = match_completed_seances(plan.seances, repo.list_activities(), today=today)
         if completions:
             plan_repo.update_seances(completions)
+            by_id = {s.id: s for s in completions}
+            plan = replace(plan, seances=[by_id.get(s.id, s) for s in plan.seances])
 
-        promotion = promote_due_weeks(plan.seances, objectif, llm=llm, today=date.today())
+        promotion = promote_due_weeks(plan.seances, objectif, llm=llm, today=today)
         if promotion.new_seances:
             new_seances = [replace(s, plan_id=plan.id) for s in promotion.new_seances]
-            plan_repo.replace_seances(promotion.removed_seance_ids, new_seances)
+            inserted = plan_repo.replace_seances(promotion.removed_seance_ids, new_seances)
+            remaining = [s for s in plan.seances if s.id not in promotion.removed_seance_ids]
+            plan = replace(plan, seances=remaining + inserted)
+
+        pushed = sync_plan_to_garmin(plan.seances, sport=objectif.sport, client=garmin, today=today)
+        if pushed:
+            plan_repo.update_seances(pushed)
 
     return SyncResponse(imported_count=result.imported_count)
 
@@ -291,7 +316,9 @@ def generate_activity_rapport(
     garmin_activity_id: str,
     repo: ActivityRepository = Depends(get_activity_repository),
     rapport_repo: RapportRepository = Depends(get_rapport_repository),
+    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
+    garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
 ) -> RapportResponse:
     activity = repo.get_activity(garmin_activity_id)
@@ -304,12 +331,17 @@ def generate_activity_rapport(
     rapport_repo.save(rapport)
 
     plan = plan_repo.get_active()
-    if plan is not None:
+    objectif = objectif_repo.get_active()
+    if plan is not None and objectif is not None:
+        today = date.today()
         adjusted = adjust_plan_for_rapport(
-            plan.seances, rapport=rapport, recent_rapports=recent_rapports, today=date.today()
+            plan.seances, rapport=rapport, recent_rapports=recent_rapports, today=today
         )
         if adjusted:
             plan_repo.update_seances(adjusted)
+            pushed = sync_plan_to_garmin(adjusted, sport=objectif.sport, client=garmin, today=today)
+            if pushed:
+                plan_repo.update_seances(pushed)
 
     return _to_rapport_response(rapport)
 

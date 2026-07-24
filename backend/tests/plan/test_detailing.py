@@ -33,6 +33,7 @@ def _coarse_seance(id: int, week_start: date, week_volume_meters: float = 20_000
         week_volume_meters=week_volume_meters,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -87,6 +88,7 @@ def test_never_touches_already_detailed_seances() -> None:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
     result = promote_due_weeks(

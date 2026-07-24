@@ -145,6 +145,24 @@ class FakePlanRepository:
         return inserted
 
 
+class FakeGarminPushClient:
+    """In-memory `plan.domain.GarminPushClient` — no real Garmin Connect call."""
+
+    def __init__(self) -> None:
+        self.pushed: list[tuple[SeanceRecord, str]] = []
+        self.deleted: list[str] = []
+        self._next_id = 1
+
+    def push_workout(self, seance: SeanceRecord, sport: str) -> str:
+        self.pushed.append((seance, sport))
+        workout_id = f"workout-{self._next_id}"
+        self._next_id += 1
+        return workout_id
+
+    def delete_workout(self, workout_id: str) -> None:
+        self.deleted.append(workout_id)
+
+
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
     return {
         "activityId": activity_id,

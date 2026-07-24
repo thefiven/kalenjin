@@ -5,6 +5,10 @@ from datetime import date
 from typing import Any, cast
 
 from garminconnect import Garmin
+from garminconnect.workout import CyclingWorkout
+
+from kalenjin.garmin.workout_builder import build_workout
+from kalenjin.plan.domain import SeanceRecord
 
 
 class GarminActivityClient:
@@ -35,3 +39,22 @@ class GarminActivityClient:
             list[dict[str, Any]],
             self._client.get_activities_by_date(start_date.isoformat(), end_date.isoformat()),
         )
+
+    def push_workout(self, seance: SeanceRecord, sport: str) -> str:
+        """Implements `plan.domain.GarminPushClient` (issue #5)."""
+        if seance.scheduled_date is None:
+            raise ValueError("Cannot push a séance with no scheduled_date")
+
+        workout = build_workout(seance, sport)
+        upload = (
+            self._client.upload_cycling_workout(workout)
+            if isinstance(workout, CyclingWorkout)
+            else self._client.upload_running_workout(workout)
+        )
+        workout_id = str(upload["workoutId"])
+        self._client.schedule_workout(workout_id, seance.scheduled_date.isoformat())
+        return workout_id
+
+    def delete_workout(self, workout_id: str) -> None:
+        """Implements `plan.domain.GarminPushClient` (issue #5)."""
+        self._client.delete_workout(workout_id)

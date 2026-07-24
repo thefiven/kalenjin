@@ -46,6 +46,7 @@ class SeanceRecord:
     week_volume_meters: float
     status: SeanceStatus
     garmin_activity_id: str | None
+    garmin_workout_id: str | None
 
 
 @dataclass(frozen=True)
@@ -91,3 +92,16 @@ class PlanRepository(Protocol):
         Returns `new_seances` with their assigned ids.
         """
         ...
+
+
+class GarminPushClient(Protocol):
+    """Boundary for pushing séances to Garmin Connect (issue #5), independent of the
+    `python-garminconnect` SDK's own typed workout classes — no vendor type leaks past
+    this Protocol, mirroring `llm.domain.LLMClient`'s ADR-0002 boundary.
+    """
+
+    def push_workout(self, seance: SeanceRecord, sport: str) -> str:
+        """Uploads and schedules a workout for `seance`, returning the Garmin workout id."""
+        ...
+
+    def delete_workout(self, workout_id: str) -> None: ...

@@ -182,6 +182,7 @@ def _to_seance(seance: Seance) -> SeanceRecord:
         week_volume_meters=seance.week_volume_meters,
         status=seance.status,  # type: ignore[arg-type]
         garmin_activity_id=seance.garmin_activity_id,
+        garmin_workout_id=seance.garmin_workout_id,
     )
 
 
@@ -198,6 +199,7 @@ def _seance_row(seance: SeanceRecord, plan_id: int) -> Seance:
         week_volume_meters=seance.week_volume_meters,
         status=seance.status,
         garmin_activity_id=seance.garmin_activity_id,
+        garmin_workout_id=seance.garmin_workout_id,
     )
 
 
@@ -253,6 +255,7 @@ class SqlAlchemyPlanRepository:
                     distance_meters=seance.distance_meters,
                     status=seance.status,
                     garmin_activity_id=seance.garmin_activity_id,
+                    garmin_workout_id=seance.garmin_workout_id,
                 )
             )
             self._session.execute(stmt)
