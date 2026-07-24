@@ -9,4 +9,5 @@ class Settings(BaseSettings):
     garmin_email: str
     garmin_password: str
     database_url: str
+    gemini_api_key: str
     garmin_tokenstore: str = str(Path.home() / ".kalenjin" / "garmin_tokens")

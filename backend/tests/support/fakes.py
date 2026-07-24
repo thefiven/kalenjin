@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
+from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
 
 
@@ -50,6 +51,31 @@ class FakeRepository:
 
     def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None:
         return self._existing.get(garmin_activity_id)
+
+
+class FakeRapportRepository:
+    """In-memory `rapport.domain.RapportRepository` — no real database."""
+
+    def __init__(self, existing: list[RapportRecord] | None = None) -> None:
+        self._existing = {r.garmin_activity_id: r for r in (existing or [])}
+
+    def save(self, rapport: RapportRecord) -> None:
+        self._existing[rapport.garmin_activity_id] = rapport
+
+    def get_for_activity(self, garmin_activity_id: str) -> RapportRecord | None:
+        return self._existing.get(garmin_activity_id)
+
+
+class FakeLLMClient:
+    """In-memory `llm.domain.LLMClient` — no real Gemini call."""
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self._response
 
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:

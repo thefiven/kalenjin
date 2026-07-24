@@ -3,10 +3,17 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from kalenjin.api import app, get_activity_repository, get_activity_source
+from kalenjin.api import (
+    app,
+    get_activity_repository,
+    get_activity_source,
+    get_llm_client,
+    get_rapport_repository,
+)
+from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
-from support.fakes import FakeRepository, raw_activity
+from support.fakes import FakeLLMClient, FakeRapportRepository, FakeRepository, raw_activity
 
 
 class _AnyRangeSource:
@@ -100,5 +107,74 @@ def test_get_activity_by_id_returns_404_when_missing() -> None:
     repo = FakeRepository()
     with overriding_dependencies({get_activity_repository: lambda: repo}):
         response = TestClient(app).get("/activities/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_generate_rapport_creates_and_persists_a_rapport() -> None:
+    activity_repo = FakeRepository(existing=[_record("1", datetime(2024, 6, 1, 7, 0))])
+    rapport_repo = FakeRapportRepository()
+    llm = FakeLLMClient('{"strengths": "Good pace.", "improvements": "Add strides."}')
+
+    with overriding_dependencies(
+        {
+            get_activity_repository: lambda: activity_repo,
+            get_rapport_repository: lambda: rapport_repo,
+            get_llm_client: lambda: llm,
+        }
+    ):
+        response = TestClient(app).post("/activities/1/rapport")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["garmin_activity_id"] == "1"
+    assert body["strengths"] == "Good pace."
+    assert body["improvements"] == "Add strides."
+    assert rapport_repo.get_for_activity("1") is not None
+
+
+def test_generate_rapport_returns_404_when_activity_is_missing() -> None:
+    activity_repo = FakeRepository()
+    rapport_repo = FakeRapportRepository()
+    llm = FakeLLMClient('{"strengths": "x", "improvements": "y"}')
+
+    with overriding_dependencies(
+        {
+            get_activity_repository: lambda: activity_repo,
+            get_rapport_repository: lambda: rapport_repo,
+            get_llm_client: lambda: llm,
+        }
+    ):
+        response = TestClient(app).post("/activities/does-not-exist/rapport")
+
+    assert response.status_code == 404
+
+
+def test_get_rapport_returns_the_persisted_rapport() -> None:
+    rapport_repo = FakeRapportRepository(
+        existing=[
+            RapportRecord(
+                garmin_activity_id="1",
+                strengths="Good pace.",
+                improvements="Add strides.",
+                generated_at=datetime(2024, 6, 1, 8, 0),
+            )
+        ]
+    )
+
+    with overriding_dependencies({get_rapport_repository: lambda: rapport_repo}):
+        response = TestClient(app).get("/activities/1/rapport")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["strengths"] == "Good pace."
+    assert body["improvements"] == "Add strides."
+
+
+def test_get_rapport_returns_404_when_missing() -> None:
+    rapport_repo = FakeRapportRepository()
+
+    with overriding_dependencies({get_rapport_repository: lambda: rapport_repo}):
+        response = TestClient(app).get("/activities/does-not-exist/rapport")
 
     assert response.status_code == 404

@@ -11,6 +11,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "garminconnect>=0.3.5",
     "pydantic-settings>=2.4",
+    "google-genai>=1.0",
 ]
 
 [project.scripts]
@@ -39,6 +40,10 @@ mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = "garminconnect.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "google.genai.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
