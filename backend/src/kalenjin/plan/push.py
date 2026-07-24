@@ -18,14 +18,22 @@ def _is_pushable(seance: SeanceRecord, today: date) -> bool:
 def sync_plan_to_garmin(
     seances: list[SeanceRecord], sport: str, client: GarminPushClient, today: date
 ) -> list[SeanceRecord]:
-    """Pushes upcoming, not-yet-completed detailed séances to Garmin Connect (issue #5).
+    """Pushes the given séances to Garmin Connect (issue #5), skipping any that are
+    coarse, completed/skipped, or scheduled in the past.
 
-    Kalenjin is always the source of truth (ADR-0001): an already-pushed séance is
-    deleted and re-uploaded rather than left stale, since `python-garminconnect` has
-    no in-place update — this still satisfies "no duplicate", it just means the
-    Garmin-side workout id changes on every push of an already-pushed séance, not only
-    when its content changed. Coarse weeks, completed/skipped séances, and past dates
-    are never touched.
+    Kalenjin is always the source of truth (ADR-0001): a séance that already has a
+    `garmin_workout_id` is deleted and re-uploaded rather than left stale, since
+    `python-garminconnect` has no in-place update — this still satisfies "no
+    duplicate", it just means the Garmin-side workout id changes every time this
+    function is called for an already-pushed séance. Callers are responsible for only
+    passing séances that actually need (re-)pushing — see `api.py`'s `/sync` (only
+    never-pushed séances, to avoid churning unchanged ones on every sync) and its
+    rapport endpoint (only the séances `adjust_plan_for_rapport` actually changed).
+
+    Not atomic: if `push_workout` fails after `delete_workout` succeeded for an
+    already-pushed séance, that séance is left unscheduled on Garmin Connect until the
+    next successful push — there's no rollback, since Garmin's API gives us nothing to
+    roll back to.
     """
     updated: list[SeanceRecord] = []
     for seance in seances:

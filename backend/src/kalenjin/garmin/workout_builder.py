@@ -65,9 +65,7 @@ def build_workout(seance: SeanceRecord, sport: str) -> RunningWorkout | CyclingW
         sportType={"sportTypeId": sport_type_id, "sportTypeKey": sport, "displayOrder": 1},
         workoutSteps=[_distance_step(seance.distance_meters)],
     )
-    estimated_duration = round(
-        seance.distance_meters / 1000 * _ROUGH_PACE_SECONDS_PER_KM.get(sport, 300.0)
-    )
+    estimated_duration = round(seance.distance_meters / 1000 * _ROUGH_PACE_SECONDS_PER_KM[sport])
 
     return workout_class(
         workoutName=f"Kalenjin — {seance.seance_type} ({seance.distance_meters / 1000:.1f}km)",
