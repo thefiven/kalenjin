@@ -19,6 +19,7 @@ _Avoid_: Programme, périodisation (la périodisation est le principe, le Plan e
 **Séance**:
 Une session d'entraînement prévue ou réalisée, rattachée à un Sport et (si prévue) à un Plan. Kalenjin en est la source de vérité : toute modification manuelle faite depuis Garmin Connect ou la montre est écrasée à la prochaine synchro.
 _Avoid_: Entraînement, workout, activité (réserver "activité" à la donnée brute remontée par Garmin après réalisation).
+_Implémentation actuelle_ : tant qu'aucun `Plan` n'existe (avant le ticket #4), l'ingestion et l'API (`ActivityRecord`/`Activity`) manipulent uniquement de l'Activité brute — le concept de Séance n'a pas encore de représentation dédiée dans le code. Introduire un type `Session` avant que le `Plan` existe serait de la généralité spéculative ; ce sera fait avec #4, quand une Séance planifiée devra se lier à l'Activité réalisée qui la complète.
 
 **Rapport**:
 L'analyse générée par l'IA après une Séance réalisée (ce qui est bien, axes d'amélioration). Sert de matière première aux Synthèses périodiques et au futur mode conversationnel.
