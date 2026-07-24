@@ -109,3 +109,4 @@ class Seance(Base):
     week_volume_meters: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     garmin_activity_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    garmin_workout_id: Mapped[str | None] = mapped_column(String, nullable=True)

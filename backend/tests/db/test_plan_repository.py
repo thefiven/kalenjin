@@ -34,6 +34,7 @@ def _detailed_seance(week_start: date, scheduled_date: date) -> SeanceRecord:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -51,6 +52,7 @@ def _coarse_seance(week_start: date) -> SeanceRecord:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 

@@ -179,6 +179,7 @@ def _week_seances(
             week_volume_meters=week.target_volume_meters,
             status="pending",
             garmin_activity_id=None,
+            garmin_workout_id=None,
         )
         for seance in seances
         if seance["type"] != "rest"
@@ -213,6 +214,7 @@ def _coarse_seance(week: WeekTarget) -> SeanceRecord:
         week_volume_meters=week.target_volume_meters,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 

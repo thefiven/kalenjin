@@ -21,6 +21,7 @@ def _seance(id: int, scheduled_date: date, status: str = "pending") -> SeanceRec
         week_volume_meters=20_000,
         status=status,
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -89,6 +90,7 @@ def test_ignores_coarse_seances() -> None:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
     updated = match_completed_seances([coarse], [], today=TODAY)

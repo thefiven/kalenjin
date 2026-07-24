@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
 from support.fakes import (
+    FakeGarminPushClient,
     FakeLLMClient,
     FakeObjectifRepository,
     FakePlanRepository,
@@ -64,6 +66,7 @@ def _detailed_seance(
         week_volume_meters=20_000,
         status=status,
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -81,6 +84,7 @@ def _coarse_seance(id: int, week_start: date) -> SeanceRecord:
         week_volume_meters=20_000,
         status="pending",
         garmin_activity_id=None,
+        garmin_workout_id=None,
     )
 
 
@@ -218,6 +222,7 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
         '{"strengths": "x", "improvements": "y", "completed_as_planned": false, '
         '"perceived_effort": "high", "flag": "pain"}'
     )
+    garmin = FakeGarminPushClient()
 
     with overriding_dependencies(
         {
@@ -225,6 +230,7 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
             get_rapport_repository: lambda: rapport_repo,
             get_objectif_repository: lambda: objectif_repo,
             get_plan_repository: lambda: plan_repo,
+            get_activity_source: lambda: garmin,
             get_llm_client: lambda: llm,
         }
     ):
@@ -234,6 +240,8 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
     updated = plan_repo.get_active().seances[0]
     assert updated.seance_type == "easy"
     assert (updated.distance_meters or 0) < 8000
+    assert len(garmin.pushed) == 1
+    assert updated.garmin_workout_id == "workout-1"
 
 
 class _EmptySource:
@@ -281,3 +289,66 @@ def test_sync_marks_past_due_seances_completed_against_synced_activities() -> No
     updated = plan_repo.get_active().seances[0]
     assert updated.status == "completed"
     assert updated.garmin_activity_id == "a1"
+
+
+def test_sync_pushes_a_never_pushed_upcoming_seance() -> None:
+    objectif_repo = FakeObjectifRepository(existing=[_objectif()])
+    plan_repo = FakePlanRepository(
+        existing=PlanRecord(
+            id=1,
+            objectif_id=1,
+            created_at=datetime(2026, 1, 1, 8, 0),
+            seances=[_detailed_seance(1, date.today() + timedelta(days=2))],
+        )
+    )
+    garmin = FakeGarminPushClient()
+
+    with overriding_dependencies(
+        {
+            get_activity_source: lambda: garmin,
+            get_activity_repository: lambda: FakeRepository(),
+            get_objectif_repository: lambda: objectif_repo,
+            get_plan_repository: lambda: plan_repo,
+            get_llm_client: lambda: FakeLLMClient(_week_response()),
+        }
+    ):
+        response = TestClient(app).post("/sync")
+
+    assert response.status_code == 200
+    assert len(garmin.pushed) == 1
+    assert plan_repo.get_active().seances[0].garmin_workout_id == "workout-1"
+
+
+def test_sync_does_not_re_push_an_already_pushed_unchanged_seance() -> None:
+    objectif_repo = FakeObjectifRepository(existing=[_objectif()])
+    plan_repo = FakePlanRepository(
+        existing=PlanRecord(
+            id=1,
+            objectif_id=1,
+            created_at=datetime(2026, 1, 1, 8, 0),
+            seances=[
+                _detailed_seance(1, date.today() + timedelta(days=2)),
+            ],
+        )
+    )
+    # Simulate an earlier successful push by giving the seance a workout id already.
+    plan_repo.update_seances(
+        [replace(plan_repo.get_active().seances[0], garmin_workout_id="already-pushed")]
+    )
+    garmin = FakeGarminPushClient()
+
+    with overriding_dependencies(
+        {
+            get_activity_source: lambda: garmin,
+            get_activity_repository: lambda: FakeRepository(),
+            get_objectif_repository: lambda: objectif_repo,
+            get_plan_repository: lambda: plan_repo,
+            get_llm_client: lambda: FakeLLMClient(_week_response()),
+        }
+    ):
+        response = TestClient(app).post("/sync")
+
+    assert response.status_code == 200
+    assert garmin.pushed == []
+    assert garmin.deleted == []
+    assert plan_repo.get_active().seances[0].garmin_workout_id == "already-pushed"
