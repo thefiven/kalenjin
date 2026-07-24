@@ -1,5 +1,5 @@
 import type { DateRange } from "@/lib/date-range";
-import type { Activity } from "@/lib/types";
+import type { Activity, Rapport } from "@/lib/types";
 
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
@@ -25,6 +25,17 @@ export async function fetchActivity(garminActivityId: string): Promise<Activity 
   if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(`Failed to fetch activity ${garminActivityId}: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchRapport(garminActivityId: string): Promise<Rapport | null> {
+  const res = await fetch(`${API_URL}/activities/${garminActivityId}/rapport`, {
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Failed to fetch rapport for activity ${garminActivityId}: ${res.status}`);
   }
   return res.json();
 }

@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from kalenjin.db.models import Activity
+from kalenjin.db.models import Activity, Rapport
+from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
 
 
@@ -74,3 +75,44 @@ class SqlAlchemyActivityRepository:
         stmt = select(Activity).where(Activity.garmin_activity_id == garmin_activity_id)
         activity = self._session.execute(stmt).scalar_one_or_none()
         return None if activity is None else _to_record(activity)
+
+
+def _to_rapport(rapport: Rapport) -> RapportRecord:
+    return RapportRecord(
+        garmin_activity_id=rapport.garmin_activity_id,
+        strengths=rapport.strengths,
+        improvements=rapport.improvements,
+        generated_at=rapport.generated_at,
+    )
+
+
+class SqlAlchemyRapportRepository:
+    """`rapport.domain.RapportRepository` backed by PostgreSQL via SQLAlchemy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def save(self, rapport: RapportRecord) -> None:
+        stmt = (
+            insert(Rapport)
+            .values(
+                garmin_activity_id=rapport.garmin_activity_id,
+                strengths=rapport.strengths,
+                improvements=rapport.improvements,
+                generated_at=rapport.generated_at,
+            )
+            .on_conflict_do_update(
+                constraint="uq_rapports_garmin_activity_id",
+                set_={
+                    "strengths": rapport.strengths,
+                    "improvements": rapport.improvements,
+                    "generated_at": rapport.generated_at,
+                },
+            )
+        )
+        self._session.execute(stmt)
+
+    def get_for_activity(self, garmin_activity_id: str) -> RapportRecord | None:
+        stmt = select(Rapport).where(Rapport.garmin_activity_id == garmin_activity_id)
+        rapport = self._session.execute(stmt).scalar_one_or_none()
+        return None if rapport is None else _to_rapport(rapport)

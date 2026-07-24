@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { ActivityDetail } from "@/components/activity-detail";
-import { fetchActivity } from "@/lib/api";
+import { fetchActivity, fetchRapport } from "@/lib/api";
 
 export default async function ActivityDetailPage({
   params,
@@ -14,9 +14,11 @@ export default async function ActivityDetailPage({
     notFound();
   }
 
+  const rapport = await fetchRapport(id);
+
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <ActivityDetail activity={activity} />
+      <ActivityDetail activity={activity} rapport={rapport} />
     </div>
   );
 }
