@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date, datetime
 from functools import lru_cache
-from typing import NamedTuple, cast
+from typing import cast
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -22,9 +22,6 @@ from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
 from kalenjin.llm.domain import LLMClient
 from kalenjin.llm.gemini_client import GeminiLLMClient
-from kalenjin.plan.adjustment import adjust_plan_for_rapport
-from kalenjin.plan.completion import match_completed_seances
-from kalenjin.plan.detailing import promote_due_weeks
 from kalenjin.plan.domain import (
     GarminPushClient,
     ObjectifRecord,
@@ -34,11 +31,10 @@ from kalenjin.plan.domain import (
     SeanceRecord,
 )
 from kalenjin.plan.generation import estimate_current_weekly_volume, generate_plan_seances
-from kalenjin.plan.push import sync_plan_to_garmin
 from kalenjin.rapport.domain import RapportRecord, RapportRepository
-from kalenjin.rapport.service import generate_rapport, select_history
+from kalenjin.rapport.orchestrator import RapportOrchestrator
 from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource, DateRange
-from kalenjin.sync.service import sync_activities
+from kalenjin.sync.orchestrator import SyncOrchestrator
 
 RECENT_RAPPORTS_FOR_ADJUSTMENT = 5
 
@@ -63,6 +59,12 @@ def get_activity_source() -> ActivitySource:
 
 
 def _get_db_session() -> Iterator[Session]:
+    """The request's shared unit-of-work seam: every `get_x_repository` provider below
+    depends on this same callable, and FastAPI caches a dependency's result for the
+    scope of one request — so any two repositories requested in the same endpoint
+    share this one session, and can safely cross-reference rows written moments
+    earlier in the same not-yet-committed transaction (e.g. `create_objectif` saving a
+    Plan that references the Objectif it just saved)."""
     settings = get_settings()
     engine = make_engine(settings.database_url)
     session_factory = make_session_factory(engine)
@@ -86,25 +88,6 @@ def get_objectif_repository(session: Session = Depends(_get_db_session)) -> Obje
 
 def get_plan_repository(session: Session = Depends(_get_db_session)) -> PlanRepository:
     return SqlAlchemyPlanRepository(session)
-
-
-class ObjectifAndPlanRepositories(NamedTuple):
-    objectif: ObjectifRepository
-    plan: PlanRepository
-
-
-def get_objectif_and_plan_repositories(
-    session: Session = Depends(_get_db_session),
-) -> ObjectifAndPlanRepositories:
-    """A single shared session for objectif+plan writes in the same request.
-
-    Separate `Depends(get_objectif_repository)`/`Depends(get_plan_repository)` each open
-    their own connection — a plan referencing an objectif created moments earlier in a
-    different, not-yet-committed session would fail its foreign key check.
-    """
-    return ObjectifAndPlanRepositories(
-        SqlAlchemyObjectifRepository(session), SqlAlchemyPlanRepository(session)
-    )
 
 
 def get_garmin_push_client(
@@ -263,33 +246,8 @@ def trigger_sync(
     garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
 ) -> SyncResponse:
-    result = sync_activities(source, repo, today=date.today())
-
-    objectif = objectif_repo.get_active()
-    plan = plan_repo.get_active()
-    if objectif is not None and plan is not None:
-        today = date.today()
-
-        completions = match_completed_seances(plan.seances, repo.list_activities(), today=today)
-        if completions:
-            plan_repo.update_seances(completions)
-            plan = plan_repo.get_active()
-            assert plan is not None
-
-        promotion = promote_due_weeks(plan.seances, objectif, llm=llm, today=today)
-        if promotion.new_seances:
-            new_seances = [replace(s, plan_id=plan.id) for s in promotion.new_seances]
-            plan_repo.replace_seances(promotion.removed_seance_ids, new_seances)
-            plan = plan_repo.get_active()
-            assert plan is not None
-
-        # Only ever-pushed here — an already-pushed séance is only re-pushed when the
-        # Plan is actually adjusted (see generate_activity_rapport), not on every sync.
-        never_pushed = [s for s in plan.seances if s.garmin_workout_id is None]
-        sync_plan_to_garmin(
-            never_pushed, sport=objectif.sport, client=garmin, plan_repo=plan_repo, today=today
-        )
-
+    orchestrator = SyncOrchestrator(source, repo, objectif_repo, plan_repo, garmin, llm)
+    result = orchestrator.run(today=date.today())
     return SyncResponse(imported_count=result.imported_count)
 
 
@@ -324,28 +282,12 @@ def generate_activity_rapport(
     garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
 ) -> RapportResponse:
-    activity = repo.get_activity(garmin_activity_id)
-    if activity is None:
+    orchestrator = RapportOrchestrator(
+        repo, rapport_repo, objectif_repo, plan_repo, garmin, llm, RECENT_RAPPORTS_FOR_ADJUSTMENT
+    )
+    rapport = orchestrator.generate_for_activity(garmin_activity_id, today=date.today())
+    if rapport is None:
         raise HTTPException(status_code=404, detail="Activity not found")
-
-    history = select_history(activity, repo.list_activities())
-    rapport = generate_rapport(activity, history=history, llm=llm)
-    recent_rapports = rapport_repo.list_recent(RECENT_RAPPORTS_FOR_ADJUSTMENT)
-    rapport_repo.save(rapport)
-
-    plan = plan_repo.get_active()
-    objectif = objectif_repo.get_active()
-    if plan is not None and objectif is not None:
-        today = date.today()
-        adjusted = adjust_plan_for_rapport(
-            plan.seances, rapport=rapport, recent_rapports=recent_rapports, today=today
-        )
-        if adjusted:
-            plan_repo.update_seances(adjusted)
-            sync_plan_to_garmin(
-                adjusted, sport=objectif.sport, client=garmin, plan_repo=plan_repo, today=today
-            )
-
     return _to_rapport_response(rapport)
 
 
@@ -364,11 +306,11 @@ def get_activity_rapport(
 def create_objectif(
     body: ObjectifRequest,
     activity_repo: ActivityRepository = Depends(get_activity_repository),
-    repos: ObjectifAndPlanRepositories = Depends(get_objectif_and_plan_repositories),
+    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
+    plan_repo: PlanRepository = Depends(get_plan_repository),
     llm: LLMClient = Depends(get_llm_client),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
-    objectif_repo, plan_repo = repos
     today = date.today()
     objectif = objectif_repo.save(
         ObjectifRecord(

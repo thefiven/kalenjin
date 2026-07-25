@@ -9,7 +9,6 @@ from kalenjin.api import (
     get_activity_repository,
     get_activity_source,
     get_llm_client,
-    get_objectif_and_plan_repositories,
     get_objectif_repository,
     get_plan_repository,
     get_rapport_repository,
@@ -96,7 +95,8 @@ def test_create_objectif_generates_and_persists_a_plan() -> None:
 
     with overriding_dependencies(
         {
-            get_objectif_and_plan_repositories: lambda: (objectif_repo, plan_repo),
+            get_objectif_repository: lambda: objectif_repo,
+            get_plan_repository: lambda: plan_repo,
             get_activity_repository: lambda: activity_repo,
             get_llm_client: lambda: llm,
         }
