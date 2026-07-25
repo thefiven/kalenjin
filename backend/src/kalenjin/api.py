@@ -249,18 +249,6 @@ class SeanceUpdateRequest(BaseModel):
     status: str | None = None
 
 
-def _push_and_persist(
-    seances: list[SeanceRecord],
-    sport: str,
-    garmin: GarminPushClient,
-    plan_repo: PlanRepository,
-    today: date,
-) -> None:
-    pushed = sync_plan_to_garmin(seances, sport=sport, client=garmin, today=today)
-    if pushed:
-        plan_repo.update_seances(pushed)
-
-
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -298,7 +286,9 @@ def trigger_sync(
         # Only ever-pushed here — an already-pushed séance is only re-pushed when the
         # Plan is actually adjusted (see generate_activity_rapport), not on every sync.
         never_pushed = [s for s in plan.seances if s.garmin_workout_id is None]
-        _push_and_persist(never_pushed, objectif.sport, garmin, plan_repo, today)
+        sync_plan_to_garmin(
+            never_pushed, sport=objectif.sport, client=garmin, plan_repo=plan_repo, today=today
+        )
 
     return SyncResponse(imported_count=result.imported_count)
 
@@ -352,7 +342,9 @@ def generate_activity_rapport(
         )
         if adjusted:
             plan_repo.update_seances(adjusted)
-            _push_and_persist(adjusted, objectif.sport, garmin, plan_repo, today)
+            sync_plan_to_garmin(
+                adjusted, sport=objectif.sport, client=garmin, plan_repo=plan_repo, today=today
+            )
 
     return _to_rapport_response(rapport)
 

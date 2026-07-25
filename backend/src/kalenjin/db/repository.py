@@ -260,6 +260,9 @@ class SqlAlchemyPlanRepository:
             )
             self._session.execute(stmt)
 
+    def commit(self) -> None:
+        self._session.commit()
+
     def replace_seances(
         self, removed_seance_ids: list[int], new_seances: list[SeanceRecord]
     ) -> list[SeanceRecord]:

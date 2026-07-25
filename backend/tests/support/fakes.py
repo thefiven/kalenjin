@@ -103,13 +103,26 @@ class FakeObjectifRepository:
 
 
 class FakePlanRepository:
-    """In-memory `plan.domain.PlanRepository` — no real database."""
+    """In-memory `plan.domain.PlanRepository` — no real database.
+
+    Mutations apply immediately (unlike the real, session-backed repository, which only
+    stages writes until something commits) — `commit_snapshots` instead records a copy
+    of plan state each time `commit()` is called, so a test can verify a caller commits
+    at the right points (see `plan.push.sync_plan_to_garmin`, which must commit after
+    each successful Garmin push) without this fake having to simulate transaction
+    rollback itself.
+    """
 
     def __init__(self, existing: PlanRecord | None = None) -> None:
         self._plan = existing
         self._next_id = 1
+        self.commit_snapshots: list[PlanRecord] = []
         if existing is not None:
             self._next_id = max((s.id or 0 for s in existing.seances), default=0) + 1
+
+    def commit(self) -> None:
+        if self._plan is not None:
+            self.commit_snapshots.append(self._plan)
 
     def save(self, plan: PlanRecord) -> PlanRecord:
         seances = []
@@ -153,12 +166,20 @@ class FakeGarminPushClient:
     exercise `/sync`'s Garmin push can override `get_activity_source` with this alone.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fail_at_push_number: int | None = None) -> None:
+        """`fail_at_push_number`, if set, makes the Nth call to `push_workout` (1-indexed,
+        counting only calls that reach this fake — i.e. past any earlier failure) raise
+        instead of succeeding, to simulate a mid-batch Garmin failure."""
         self.pushed: list[tuple[SeanceRecord, str]] = []
         self.deleted: list[str] = []
         self._next_id = 1
+        self._fail_at_push_number = fail_at_push_number
+        self._push_attempts = 0
 
     def push_workout(self, seance: SeanceRecord, sport: str) -> str:
+        self._push_attempts += 1
+        if self._push_attempts == self._fail_at_push_number:
+            raise RuntimeError("simulated Garmin push failure")
         self.pushed.append((seance, sport))
         workout_id = f"workout-{self._next_id}"
         self._next_id += 1
