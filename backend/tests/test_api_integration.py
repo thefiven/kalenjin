@@ -32,6 +32,7 @@ def test_create_objectif_shares_one_real_session_across_its_two_repositories(
     `Depends(get_objectif_repository)`/`Depends(get_plan_repository)` calls, this would
     fail with a foreign key violation instead of silently passing against fakes.
     """
+
     def _session_override() -> Iterator[Session]:
         yield db_session
 
