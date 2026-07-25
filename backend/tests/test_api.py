@@ -1,12 +1,14 @@
 from datetime import date, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from kalenjin.api import (
     app,
     get_activity_repository,
     get_activity_source,
+    get_garmin_push_client,
     get_llm_client,
     get_objectif_repository,
     get_plan_repository,
@@ -21,19 +23,32 @@ from support.fakes import (
     FakePlanRepository,
     FakeRapportRepository,
     FakeRepository,
+    FakeSource,
+    RejectsPush,
     raw_activity,
 )
 
 
-class _AnyRangeSource:
+class _AnyRangeSource(RejectsPush):
     """Returns the same activities regardless of the requested date range —
-    the endpoint test only cares about the final imported count, not chunking."""
+    the endpoint test only cares about the final imported count, not chunking.
+
+    Every test using this fake exercises a route with no active plan/objectif, so
+    push (via the inherited `RejectsPush`) is never expected to actually fire."""
 
     def __init__(self, raw_activities: list[dict[str, Any]]) -> None:
         self._raw_activities = raw_activities
 
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         return self._raw_activities
+
+
+def test_get_garmin_push_client_rejects_a_narrow_activity_only_source() -> None:
+    """`get_activity_source` overridden with something only `ActivitySource`-shaped
+    (no push_workout/delete_workout) must fail loudly right here, not with a
+    confusing AttributeError buried inside a later Garmin push call."""
+    with pytest.raises(AssertionError):
+        get_garmin_push_client(source=FakeSource({}))
 
 
 def test_health_check() -> None:

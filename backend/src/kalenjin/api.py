@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date, datetime
 from functools import lru_cache
-from typing import cast
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -20,6 +19,7 @@ from kalenjin.db.repository import (
 )
 from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
+from kalenjin.garmin.domain import GarminSessionClient
 from kalenjin.llm.domain import LLMClient
 from kalenjin.llm.gemini_client import GeminiLLMClient
 from kalenjin.plan.domain import (
@@ -58,7 +58,7 @@ def get_llm_config() -> LlmConfig:
 
 def get_activity_source(
     garmin_config: GarminConfig = Depends(get_garmin_config),
-) -> ActivitySource:
+) -> GarminSessionClient:
     client = GarminActivityClient(
         email=garmin_config.garmin_email,
         password=garmin_config.garmin_password,
@@ -101,15 +101,25 @@ def get_plan_repository(session: Session = Depends(_get_db_session)) -> PlanRepo
 
 
 def get_garmin_push_client(
-    source: ActivitySource = Depends(get_activity_source),
+    source: GarminSessionClient = Depends(get_activity_source),
 ) -> GarminPushClient:
-    """The same logged-in `GarminActivityClient` as `get_activity_source`, retyped.
+    """The same logged-in `GarminActivityClient` as `get_activity_source`.
 
     Depending on `get_activity_source` (rather than constructing a second client) lets
     FastAPI's per-request dependency caching reuse the one already-authenticated
     session instead of logging in twice — see issue #5's "reuse the auth from #1".
+    `GarminSessionClient` already includes `GarminPushClient`'s methods, so no cast
+    is needed — the `isinstance` check below only exists because a test overriding
+    `get_activity_source` with a narrower fake (only `ActivitySource`-shaped) isn't
+    caught by mypy, since this repo's CI doesn't type-check `tests/`; it turns that
+    mistake into a clear assertion right at this seam instead of a confusing
+    `AttributeError` buried inside a later `push_workout`/`delete_workout` call.
     """
-    return cast(GarminPushClient, source)
+    assert isinstance(source, GarminSessionClient), (
+        f"{source!r} doesn't implement push_workout/delete_workout — "
+        "get_activity_source must be overridden with something GarminSessionClient-shaped."
+    )
+    return source
 
 
 def get_llm_client(llm_config: LlmConfig = Depends(get_llm_config)) -> LLMClient:
