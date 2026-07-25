@@ -3,22 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from kalenjin.plan.domain import SeanceRecord
+from kalenjin.plan.domain import SeanceRecord, is_upcoming_seance
 from kalenjin.rapport.domain import RapportRecord
 
 BACKOFF_FACTOR = 0.85
 HARD_STOP_RECOVERY_SHARE = 0.15
 CONSECUTIVE_HIGH_EFFORT_THRESHOLD = 2
 _HARD_STOP_FLAGS = frozenset({"pain", "illness"})
-
-
-def _is_adjustable(seance: SeanceRecord, today: date) -> bool:
-    return (
-        seance.detail == "detailed"
-        and seance.status == "pending"
-        and seance.scheduled_date is not None
-        and seance.scheduled_date >= today
-    )
 
 
 def _consecutive_high_effort_count(rapports: list[RapportRecord]) -> int:
@@ -64,7 +55,7 @@ def adjust_plan_for_rapport(
       upcoming pending séance — never an increase.
     - Otherwise, no adjustment: the pre-committed plan stands.
     """
-    adjustable = [s for s in seances if _is_adjustable(s, today)]
+    adjustable = [s for s in seances if is_upcoming_seance(s, today)]
     if not adjustable:
         return []
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from kalenjin.plan.domain import SeanceRecord
+from kalenjin.plan.domain import SeanceRecord, is_past_due_seance
 from kalenjin.sync.domain import ActivityRecord
 
 
@@ -21,14 +21,10 @@ def match_completed_seances(
 
     updated: list[SeanceRecord] = []
     for seance in seances:
-        if (
-            seance.detail != "detailed"
-            or seance.status != "pending"
-            or seance.scheduled_date is None
-            or seance.scheduled_date >= today
-        ):
+        if not is_past_due_seance(seance, today):
             continue
 
+        assert seance.scheduled_date is not None
         match = activities_by_date.get(seance.scheduled_date)
         if match is not None:
             updated.append(

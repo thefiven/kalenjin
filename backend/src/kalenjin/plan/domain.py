@@ -49,6 +49,31 @@ class SeanceRecord:
     garmin_workout_id: str | None
 
 
+def _live_scheduled_date(seance: SeanceRecord) -> date | None:
+    """`scheduled_date` if `seance` is live — detailed and still pending — else `None`.
+
+    The concept behind `is_upcoming_seance`/`is_past_due_seance`: a coarse week, or a
+    séance already completed/skipped, is never live regardless of its date.
+    """
+    if seance.detail != "detailed" or seance.status != "pending":
+        return None
+    return seance.scheduled_date
+
+
+def is_upcoming_seance(seance: SeanceRecord, today: date) -> bool:
+    """A live séance scheduled today or later — still actionable enough to push to
+    Garmin (`plan.push`) or adjust from a Rapport (`plan.adjustment`)."""
+    scheduled_date = _live_scheduled_date(seance)
+    return scheduled_date is not None and scheduled_date >= today
+
+
+def is_past_due_seance(seance: SeanceRecord, today: date) -> bool:
+    """A live séance scheduled before today — due to be matched against a realized
+    activity by `plan.completion.match_completed_seances`."""
+    scheduled_date = _live_scheduled_date(seance)
+    return scheduled_date is not None and scheduled_date < today
+
+
 @dataclass(frozen=True)
 class PlanRecord:
     id: int | None
