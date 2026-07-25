@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 
 from kalenjin.llm.domain import LLMClient
+from kalenjin.llm.structured import StructuredResponseError, parse_json_response
 from kalenjin.rapport.domain import PERCEIVED_EFFORTS, RAPPORT_FLAGS, RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 
@@ -48,14 +48,6 @@ def _build_prompt(activity: ActivityRecord, history: list[ActivityRecord]) -> st
     )
 
 
-def _strip_code_fences(response: str) -> str:
-    text = response.strip()
-    if text.startswith("```"):
-        text = text.removeprefix("```json").removeprefix("```").strip()
-        text = text.removesuffix("```").strip()
-    return text
-
-
 def generate_rapport(
     activity: ActivityRecord,
     history: list[ActivityRecord],
@@ -66,9 +58,9 @@ def generate_rapport(
     response = llm.generate(prompt)
 
     try:
-        payload = json.loads(_strip_code_fences(response))
-    except json.JSONDecodeError as exc:
-        raise RapportGenerationError(f"LLM response was not valid JSON: {response!r}") from exc
+        payload = parse_json_response(response)
+    except StructuredResponseError as exc:
+        raise RapportGenerationError(str(exc)) from exc
 
     if not isinstance(payload, dict) or not all(
         isinstance(payload.get(key), str) for key in _REQUIRED_STRING_KEYS
