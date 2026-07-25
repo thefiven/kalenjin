@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from kalenjin.cli import prompt_mfa_via_console
-from kalenjin.config.settings import Settings
+from kalenjin.config.settings import DbConfig, GarminConfig, LlmConfig
 from kalenjin.db.repository import (
     SqlAlchemyActivityRepository,
     SqlAlchemyObjectifRepository,
@@ -42,31 +42,41 @@ app = FastAPI(title="Kalenjin")
 
 
 @lru_cache
-def get_settings() -> Settings:
-    return Settings()  # type: ignore[call-arg]  # fields are sourced from the environment
+def get_garmin_config() -> GarminConfig:
+    return GarminConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
 
-def get_activity_source() -> ActivitySource:
-    settings = get_settings()
+@lru_cache
+def get_db_config() -> DbConfig:
+    return DbConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+
+
+@lru_cache
+def get_llm_config() -> LlmConfig:
+    return LlmConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+
+
+def get_activity_source(
+    garmin_config: GarminConfig = Depends(get_garmin_config),
+) -> ActivitySource:
     client = GarminActivityClient(
-        email=settings.garmin_email,
-        password=settings.garmin_password,
-        tokenstore=settings.garmin_tokenstore,
+        email=garmin_config.garmin_email,
+        password=garmin_config.garmin_password,
+        tokenstore=garmin_config.garmin_tokenstore,
         prompt_mfa=prompt_mfa_via_console,
     )
     client.login()
     return client
 
 
-def _get_db_session() -> Iterator[Session]:
+def _get_db_session(db_config: DbConfig = Depends(get_db_config)) -> Iterator[Session]:
     """The request's shared unit-of-work seam: every `get_x_repository` provider below
     depends on this same callable, and FastAPI caches a dependency's result for the
     scope of one request — so any two repositories requested in the same endpoint
     share this one session, and can safely cross-reference rows written moments
     earlier in the same not-yet-committed transaction (e.g. `create_objectif` saving a
     Plan that references the Objectif it just saved)."""
-    settings = get_settings()
-    engine = make_engine(settings.database_url)
+    engine = make_engine(db_config.database_url)
     session_factory = make_session_factory(engine)
     with session_scope(session_factory) as session:
         yield session
@@ -102,8 +112,8 @@ def get_garmin_push_client(
     return cast(GarminPushClient, source)
 
 
-def get_llm_client() -> LLMClient:
-    return GeminiLLMClient(api_key=get_settings().gemini_api_key)
+def get_llm_client(llm_config: LlmConfig = Depends(get_llm_config)) -> LLMClient:
+    return GeminiLLMClient(api_key=llm_config.gemini_api_key)
 
 
 def _to_response(activity: ActivityRecord) -> ActivityResponse:

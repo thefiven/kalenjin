@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from kalenjin.config.settings import Settings
+from kalenjin.config.settings import DbConfig, GarminConfig
 from kalenjin.db.repository import SqlAlchemyActivityRepository
 from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
@@ -19,17 +19,18 @@ def prompt_mfa_via_console() -> str:
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
-    settings = Settings()  # type: ignore[call-arg]  # fields are sourced from the environment
+    garmin_config = GarminConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+    db_config = DbConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
     source = GarminActivityClient(
-        email=settings.garmin_email,
-        password=settings.garmin_password,
-        tokenstore=settings.garmin_tokenstore,
+        email=garmin_config.garmin_email,
+        password=garmin_config.garmin_password,
+        tokenstore=garmin_config.garmin_tokenstore,
         prompt_mfa=prompt_mfa_via_console,
     )
     source.login()
 
-    engine = make_engine(settings.database_url)
+    engine = make_engine(db_config.database_url)
     session_factory = make_session_factory(engine)
 
     with session_scope(session_factory) as session:
