@@ -3,16 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from kalenjin.plan.domain import GarminPushClient, PlanRepository, SeanceRecord
-
-
-def _is_pushable(seance: SeanceRecord, today: date) -> bool:
-    return (
-        seance.detail == "detailed"
-        and seance.status == "pending"
-        and seance.scheduled_date is not None
-        and seance.scheduled_date >= today
-    )
+from kalenjin.plan.domain import GarminPushClient, PlanRepository, SeanceRecord, is_upcoming_seance
 
 
 def sync_plan_to_garmin(
@@ -49,7 +40,7 @@ def sync_plan_to_garmin(
     """
     updated: list[SeanceRecord] = []
     for seance in seances:
-        if not _is_pushable(seance, today):
+        if not is_upcoming_seance(seance, today):
             continue
 
         if seance.garmin_workout_id is not None:
