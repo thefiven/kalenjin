@@ -93,6 +93,18 @@ class PlanRepository(Protocol):
         """
         ...
 
+    def commit(self) -> None:
+        """Durably persist every write made on this repository so far, independent of
+        whatever the rest of the ambient request does afterward.
+
+        The request-scoped session otherwise commits (or rolls back) only once, at the
+        very end — see `db.session.session_scope`. `plan.push.sync_plan_to_garmin`
+        calls this after each successful Garmin push specifically so that a later
+        push's failure, later in the same request, can't roll back an earlier one that
+        already, genuinely happened on Garmin's side.
+        """
+        ...
+
 
 class GarminPushClient(Protocol):
     """Boundary for pushing séances to Garmin Connect (issue #5), independent of the
