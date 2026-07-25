@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from itertools import pairwise
 from typing import Any
 
 from kalenjin.llm.domain import LLMClient
+from kalenjin.llm.structured import StructuredResponseError, parse_json_response
 from kalenjin.plan.domain import HARD_SEANCE_TYPES, ObjectifRecord, SeanceRecord
 from kalenjin.plan.periodization import Phase, WeekTarget, compute_week_targets
 from kalenjin.sync.domain import ActivityRecord
@@ -41,19 +41,11 @@ def estimate_current_weekly_volume(
     return total / weeks
 
 
-def _strip_code_fences(response: str) -> str:
-    text = response.strip()
-    if text.startswith("```"):
-        text = text.removeprefix("```json").removeprefix("```").strip()
-        text = text.removesuffix("```").strip()
-    return text
-
-
 def _parse_and_validate_seances(response: str, week: WeekTarget) -> list[dict[str, Any]]:
     try:
-        payload = json.loads(_strip_code_fences(response))
-    except json.JSONDecodeError as exc:
-        raise PlanGenerationError(f"LLM response was not valid JSON: {response!r}") from exc
+        payload = parse_json_response(response)
+    except StructuredResponseError as exc:
+        raise PlanGenerationError(str(exc)) from exc
 
     if not isinstance(payload, list):
         raise PlanGenerationError(f"LLM response was not a JSON array: {response!r}")
