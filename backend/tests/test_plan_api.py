@@ -23,6 +23,7 @@ from support.fakes import (
     FakePlanRepository,
     FakeRapportRepository,
     FakeRepository,
+    RejectsPush,
 )
 
 MONDAY = date(2026, 1, 5)
@@ -244,7 +245,10 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
     assert updated.garmin_workout_id == "workout-1"
 
 
-class _EmptySource:
+class _EmptySource(RejectsPush):
+    """The test using this fake has no pushable séance, so push (via the inherited
+    `RejectsPush`) is never expected to actually fire."""
+
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict]:  # type: ignore[type-arg]
         return []
 

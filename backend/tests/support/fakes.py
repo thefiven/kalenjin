@@ -7,6 +7,18 @@ from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
 
 
+class RejectsPush:
+    """Mixin for `ActivitySource`-only test fakes that still need to satisfy
+    `garmin.domain.GarminSessionClient`'s shape, since `get_garmin_push_client` asserts
+    on it — raises if push is ever actually exercised through one of these fakes."""
+
+    def push_workout(self, seance: SeanceRecord, sport: str) -> str:
+        raise NotImplementedError("push must not be exercised in tests using this fake")
+
+    def delete_workout(self, workout_id: str) -> None:
+        raise NotImplementedError("push must not be exercised in tests using this fake")
+
+
 class FakeSource:
     """In-memory `sync.domain.ActivitySource` — no real Garmin call."""
 
