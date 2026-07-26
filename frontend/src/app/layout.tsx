@@ -49,6 +49,9 @@ export default function RootLayout({
               <Link href="/connect/gemini" className="font-medium hover:underline">
                 Gemini
               </Link>
+              <Link href="/connect/garmin" className="font-medium hover:underline">
+                Garmin
+              </Link>
             </div>
             <div className="flex items-center gap-4">
               <ThemeToggle />
