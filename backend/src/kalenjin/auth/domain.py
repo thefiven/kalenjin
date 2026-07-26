@@ -29,12 +29,19 @@ class GoogleIdentityVerifier(Protocol):
 
 @dataclass(frozen=True)
 class UserRecord:
-    """A Kalenjin account — one per invited person (ADR-0008)."""
+    """A Kalenjin account — one per invited person (ADR-0008).
+
+    `gemini_api_key_encrypted` is the user's own Gemini API key (issue #29), stored
+    encrypted (ADR-0010) — `None` until they've connected one. Still ciphertext here;
+    callers decrypt it themselves with `security.encryption`, which needs the
+    encryption key that isn't this record's concern.
+    """
 
     id: int | None
     google_subject: str
     email: str
     created_at: datetime
+    gemini_api_key_encrypted: str | None = None
 
 
 class UserRepository(Protocol):
@@ -58,4 +65,10 @@ class UserRepository(Protocol):
     def create(self, subject: str, email: str) -> UserRecord:
         """Creates a new `User` row. Callers must have already checked
         `is_email_allowed`."""
+        ...
+
+    def set_gemini_api_key(self, user_id: int, encrypted_key: str) -> None:
+        """Stores (or replaces, on rotation) the user's encrypted Gemini API key
+        (issue #29). Callers encrypt before calling — this repository only persists
+        ciphertext."""
         ...

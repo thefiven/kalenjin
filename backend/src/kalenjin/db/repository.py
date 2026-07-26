@@ -331,6 +331,7 @@ def _to_user(user: User) -> UserRecord:
         google_subject=user.google_subject,
         email=user.email,
         created_at=user.created_at,
+        gemini_api_key_encrypted=user.gemini_api_key_encrypted,
     )
 
 
@@ -366,3 +367,7 @@ class SqlAlchemyUserRepository:
         self._session.add(row)
         self._session.flush()
         return _to_user(row)
+
+    def set_gemini_api_key(self, user_id: int, encrypted_key: str) -> None:
+        stmt = update(User).where(User.id == user_id).values(gemini_api_key_encrypted=encrypted_key)
+        self._session.execute(stmt)

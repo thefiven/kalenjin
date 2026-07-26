@@ -15,7 +15,7 @@ from kalenjin.auth.domain import GoogleIdentityVerifier, UserRecord, UserReposit
 from kalenjin.auth.google_client import GoogleAuthError, GoogleOAuthClient
 from kalenjin.auth.session import DEFAULT_SESSION_MAX_AGE_SECONDS, SessionCodec
 from kalenjin.cli import prompt_mfa_via_console
-from kalenjin.config.settings import AuthConfig, DbConfig, GarminConfig, LlmConfig
+from kalenjin.config.settings import AuthConfig, DbConfig, EncryptionConfig, GarminConfig
 from kalenjin.db.repository import (
     SqlAlchemyActivityRepository,
     SqlAlchemyObjectifRepository,
@@ -27,7 +27,7 @@ from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
 from kalenjin.garmin.domain import GarminSessionClient
 from kalenjin.llm.domain import LLMClient
-from kalenjin.llm.gemini_client import GeminiLLMClient
+from kalenjin.llm.gemini_client import GeminiLLMClient, validate_gemini_api_key
 from kalenjin.plan.domain import (
     GarminPushClient,
     ObjectifRecord,
@@ -39,6 +39,7 @@ from kalenjin.plan.domain import (
 from kalenjin.plan.generation import estimate_current_weekly_volume, generate_plan_seances
 from kalenjin.rapport.domain import RapportRecord, RapportRepository
 from kalenjin.rapport.orchestrator import RapportOrchestrator
+from kalenjin.security.encryption import decrypt, encrypt
 from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource, DateRange
 from kalenjin.sync.orchestrator import SyncOrchestrator
 
@@ -63,13 +64,13 @@ def get_db_config() -> DbConfig:
 
 
 @lru_cache
-def get_llm_config() -> LlmConfig:
-    return LlmConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+def get_auth_config() -> AuthConfig:
+    return AuthConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
 
 @lru_cache
-def get_auth_config() -> AuthConfig:
-    return AuthConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+def get_encryption_config() -> EncryptionConfig:
+    return EncryptionConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
 
 def get_activity_source(
@@ -190,8 +191,16 @@ def get_garmin_push_client(
     return source
 
 
-def get_llm_client(llm_config: LlmConfig = Depends(get_llm_config)) -> LLMClient:
-    return GeminiLLMClient(api_key=llm_config.gemini_api_key)
+def get_llm_client(
+    user: UserRecord = Depends(get_current_user),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+) -> LLMClient:
+    """Each user's own Gemini key (issue #29), never the old shared global one —
+    `LlmConfig`/`GEMINI_API_KEY` are retired for authenticated requests."""
+    if user.gemini_api_key_encrypted is None:
+        raise HTTPException(status_code=400, detail="Connect your Gemini API key first")
+    api_key = decrypt(user.gemini_api_key_encrypted, encryption_config.secret_encryption_key)
+    return GeminiLLMClient(api_key=api_key)
 
 
 def _to_response(activity: ActivityRecord) -> ActivityResponse:
@@ -404,6 +413,28 @@ def logout() -> Response:
 @app.get("/auth/me", response_model=MeResponse)
 def get_me(user: UserRecord = Depends(get_current_user)) -> MeResponse:
     return MeResponse(email=user.email)
+
+
+class SetGeminiApiKeyRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/users/me/gemini-key", status_code=204)
+def set_gemini_api_key(
+    body: SetGeminiApiKeyRequest,
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+) -> Response:
+    """Self-service Gemini key onboarding (issue #29) — validated with a real call
+    before being stored encrypted, so a typo is caught immediately rather than at the
+    next rapport generation. Resubmitting replaces the previous key (rotation)."""
+    if not validate_gemini_api_key(body.api_key):
+        raise HTTPException(status_code=400, detail="Invalid Gemini API key")
+
+    encrypted = encrypt(body.api_key, encryption_config.secret_encryption_key)
+    user_repo.set_gemini_api_key(_require_user_id(user), encrypted)
+    return Response(status_code=204)
 
 
 @app.post("/sync", response_model=SyncResponse)
