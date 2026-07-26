@@ -6,7 +6,16 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from kalenjin.db.models import Activity, Objectif, Plan, Rapport, Seance
+from kalenjin.auth.domain import UserRecord
+from kalenjin.db.models import (
+    Activity,
+    InviteAllowlistEntry,
+    Objectif,
+    Plan,
+    Rapport,
+    Seance,
+    User,
+)
 from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
@@ -273,3 +282,46 @@ class SqlAlchemyPlanRepository:
         self._session.add_all(rows)
         self._session.flush()
         return [_to_seance(row) for row in rows]
+
+
+def _to_user(user: User) -> UserRecord:
+    return UserRecord(
+        id=user.id,
+        google_subject=user.google_subject,
+        email=user.email,
+        created_at=user.created_at,
+    )
+
+
+class SqlAlchemyUserRepository:
+    """`auth.domain.UserRepository` backed by PostgreSQL via SQLAlchemy."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def is_email_allowed(self, email: str) -> bool:
+        stmt = select(InviteAllowlistEntry.email).where(InviteAllowlistEntry.email == email)
+        return self._session.execute(stmt).first() is not None
+
+    def add_to_allowlist(self, email: str) -> None:
+        stmt = (
+            insert(InviteAllowlistEntry)
+            .values(email=email, created_at=datetime.now())
+            .on_conflict_do_nothing(index_elements=["email"])
+        )
+        self._session.execute(stmt)
+
+    def find_by_google_subject(self, subject: str) -> UserRecord | None:
+        stmt = select(User).where(User.google_subject == subject)
+        user = self._session.execute(stmt).scalar_one_or_none()
+        return None if user is None else _to_user(user)
+
+    def find_by_id(self, user_id: int) -> UserRecord | None:
+        user = self._session.get(User, user_id)
+        return None if user is None else _to_user(user)
+
+    def create(self, subject: str, email: str) -> UserRecord:
+        row = User(google_subject=subject, email=email, created_at=datetime.now())
+        self._session.add(row)
+        self._session.flush()
+        return _to_user(row)

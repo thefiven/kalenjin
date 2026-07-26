@@ -90,6 +90,28 @@ class Plan(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
 
 
+class User(Base):
+    """An authenticated Kalenjin account — one per invited person (ADR-0008)."""
+
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("google_subject", name="uq_users_google_subject"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    google_subject: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+
+class InviteAllowlistEntry(Base):
+    """An email address the owner has invited to sign in — checked before a `User`
+    row is created for a Google login (ADR-0006, ADR-0008)."""
+
+    __tablename__ = "invite_allowlist"
+
+    email: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+
 class Seance(Base):
     """One entry — coarse (a week) or detailed (a concrete session) — in a `Plan`."""
 

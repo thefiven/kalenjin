@@ -2,6 +2,8 @@ from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 
+from kalenjin.auth.domain import GoogleIdentity, UserRecord
+from kalenjin.auth.google_client import GoogleAuthError
 from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord, DateRange
@@ -202,6 +204,56 @@ class FakeGarminPushClient:
 
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         return []
+
+
+class FakeGoogleIdentityVerifier:
+    """In-memory `auth.domain.GoogleIdentityVerifier` — no real Google call."""
+
+    def __init__(self, identity: GoogleIdentity | None = None) -> None:
+        self._identity = identity
+        self.exchanged_codes: list[str] = []
+
+    def authorization_url(self, redirect_uri: str, state: str) -> str:
+        return f"https://accounts.google.com/fake-consent?state={state}"
+
+    def exchange_code(self, code: str, redirect_uri: str) -> GoogleIdentity:
+        self.exchanged_codes.append(code)
+        if self._identity is None:
+            raise GoogleAuthError("no identity configured for this fake")
+        return self._identity
+
+
+class FakeUserRepository:
+    """In-memory `auth.domain.UserRepository` — no real database."""
+
+    def __init__(
+        self,
+        allowed_emails: set[str] | None = None,
+        existing: list[UserRecord] | None = None,
+    ) -> None:
+        self._allowed_emails = set(allowed_emails or set())
+        self._users = list(existing or [])
+        self._next_id = max((u.id or 0 for u in self._users), default=0) + 1
+
+    def is_email_allowed(self, email: str) -> bool:
+        return email in self._allowed_emails
+
+    def add_to_allowlist(self, email: str) -> None:
+        self._allowed_emails.add(email)
+
+    def find_by_google_subject(self, subject: str) -> UserRecord | None:
+        return next((u for u in self._users if u.google_subject == subject), None)
+
+    def find_by_id(self, user_id: int) -> UserRecord | None:
+        return next((u for u in self._users if u.id == user_id), None)
+
+    def create(self, subject: str, email: str) -> UserRecord:
+        user = UserRecord(
+            id=self._next_id, google_subject=subject, email=email, created_at=datetime.now()
+        )
+        self._next_id += 1
+        self._users.append(user)
+        return user
 
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
