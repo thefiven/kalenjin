@@ -1,4 +1,5 @@
 from google import genai
+from google.genai import errors
 
 
 class GeminiLLMClient:
@@ -17,3 +18,15 @@ class GeminiLLMClient:
         if response.text is None:
             raise RuntimeError("Gemini returned an empty response")
         return response.text
+
+
+def validate_gemini_api_key(api_key: str) -> bool:
+    """Confirms `api_key` actually authenticates against Gemini (issue #29) — a
+    self-service onboarding submission gets a clear rejection immediately, rather
+    than a working-looking submission that only fails at the next rapport
+    generation."""
+    try:
+        GeminiLLMClient(api_key=api_key).generate("Reply with OK.")
+    except errors.ClientError:
+        return False
+    return True

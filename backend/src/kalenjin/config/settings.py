@@ -17,12 +17,6 @@ class DbConfig(BaseSettings):
     database_url: str
 
 
-class LlmConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    gemini_api_key: str
-
-
 class EncryptionConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

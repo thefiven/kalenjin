@@ -116,6 +116,7 @@ class User(Base):
     google_subject: Mapped[str] = mapped_column(String, nullable=False, index=True)
     email: Mapped[str] = mapped_column(String, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    gemini_api_key_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class InviteAllowlistEntry(Base):

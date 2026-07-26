@@ -114,3 +114,20 @@ export async function updateSeance(seanceId: number, input: UpdateSeanceInput): 
   }
   return res.json();
 }
+
+export type SetGeminiApiKeyResult = { success: true } | { success: false; error: string };
+
+export async function setGeminiApiKey(apiKey: string): Promise<SetGeminiApiKeyResult> {
+  const res = await fetch(`${API_URL}/users/me/gemini-key`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ api_key: apiKey }),
+    cache: "no-store",
+  });
+  if (res.ok) return { success: true };
+
+  const body: unknown = await res.json().catch(() => null);
+  const detail =
+    body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
+  return { success: false, error: detail ?? `Failed to save API key: ${res.status}` };
+}

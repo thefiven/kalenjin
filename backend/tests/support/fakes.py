@@ -255,6 +255,10 @@ class FakeUserRepository:
         self._users.append(user)
         return user
 
+    def set_gemini_api_key(self, user_id: int, encrypted_key: str) -> None:
+        idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
+        self._users[idx] = replace(self._users[idx], gemini_api_key_encrypted=encrypted_key)
+
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
     return {
