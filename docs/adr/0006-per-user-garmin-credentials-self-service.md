@@ -1,0 +1,5 @@
+# Identifiants Garmin stockés par utilisateur, via formulaire self-service
+
+Kalenjin passe d'un usage mono-utilisateur (identifiants Garmin en variable d'environnement, `config/settings.py`) à un SaaS invite-only où chaque utilisateur connecte son propre compte Garmin. `python-garminconnect` n'expose pas d'OAuth : l'authentification se fait avec le vrai email/mot de passe Garmin de l'utilisateur (impersonation via `curl_cffi`), il n'existe pas de jeton révocable côté Garmin. Kalenjin doit donc stocker ces identifiants réels (chiffrés at-rest) pour chaque utilisateur, via un écran d'onboarding self-service ("connecter mon compte Garmin") plutôt qu'une configuration faite manuellement par l'opérateur pour chaque personne invitée.
+
+Ce choix est assumé pour la phase invite-only (cercle de confiance restreint) mais resterait à revoir si l'app s'ouvre au public : l'alternative — le programme officiel Garmin Health API / Connect Developer Program (OAuth, sans stockage de mot de passe) — a été écartée pour l'instant faute de délai d'approbation connu et parce que son périmètre de données pourrait différer de l'ingestion actuelle.

@@ -31,9 +31,9 @@ _Avoid_: Feedback, retour (termes utilisés de façon informelle en dehors du gl
 
 ## Design
 
-Thème visuel neutre et épuré (type Linear/Notion) avec un unique accent de couleur, plutôt qu'une identité sportive marquée — la donnée (graphiques, agenda) porte l'identité visuelle, pas le chrome de l'UI. Composants : shadcn/ui sur Next.js/Tailwind, thème clair/sombre natif.
+Thème visuel neutre et épuré (type Linear/Notion) avec un unique accent de couleur, plutôt qu'une identité sportive marquée — la donnée (graphiques, agenda) porte l'identité visuelle, pas le chrome de l'UI. Composants : shadcn/ui sur Next.js/Tailwind, thème clair/sombre natif. Ce choix sert aussi à distinguer Kalenjin de Runna dans son identité et son discours produit, même si le fonctionnement du plan s'en inspire (ADR-0001, ADR-0009).
 
 ## Scope
 
-- Usage strictement personnel (un seul utilisateur, un seul compte Garmin). Pas de multi-tenant pour l'instant.
+- SaaS multi-utilisateur en invite-only : plusieurs comptes utilisateurs, chacun avec son propre compte Garmin. Pas d'inscription publique pour l'instant — à réévaluer selon l'usage (voir ADR-0006).
 - Connexion Garmin via `python-garminconnect` (v0.3.5+), librairie communautaire non-officielle authentifiée avec les identifiants Garmin de l'utilisateur — pas l'API officielle Garmin Health/Connect Developer Program. `garth`, dont dépendait l'auth historique, est déprécié depuis que Garmin a cassé son flow d'auth (mars 2026) ; `python-garminconnect` a survécu en réécrivant son auth avec `curl_cffi` (impersonation TLS). Ni Strava (pas de push de séance vers une montre) ni Health Connect (entrepôt local au téléphone, pas d'API cloud) ne peuvent se substituer à Garmin Connect pour ce projet, car le push de séances structurées vers la montre est irremplaçable par ces alternatives.
