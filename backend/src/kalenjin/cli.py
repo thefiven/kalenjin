@@ -17,8 +17,18 @@ def prompt_mfa_via_console() -> str:
     return input("Garmin MFA code: ")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """Syncs Garmin activities for one user (issue #28 — `Activity` rows are per-user,
+    so this CLI, which runs outside the web session/auth layer, needs to be told which
+    `User` row to attribute the sync to)."""
     logging.basicConfig(level=logging.INFO)
+    args = argv if argv is not None else sys.argv[1:]
+    if len(args) != 1:
+        raise SystemExit("Usage: kalenjin-sync <user-id>")
+    try:
+        user_id = int(args[0])
+    except ValueError:
+        raise SystemExit(f"<user-id> must be an integer, got {args[0]!r}") from None
 
     garmin_config = GarminConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
     db_config = DbConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
@@ -35,7 +45,7 @@ def main() -> None:
     session_factory = make_session_factory(engine)
 
     with session_scope(session_factory) as session:
-        repo = SqlAlchemyActivityRepository(session)
+        repo = SqlAlchemyActivityRepository(session, user_id)
         result = sync_activities(source, repo, today=date.today())
 
     logger.info("Synced %d new activities", result.imported_count)

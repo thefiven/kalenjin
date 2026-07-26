@@ -21,14 +21,14 @@ def _record(activity_id: str, started_at: datetime = datetime(2024, 6, 1, 7, 30)
     )
 
 
-def test_has_any_is_false_when_empty(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_has_any_is_false_when_empty(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
 
     assert repo.has_any() is False
 
 
-def test_upsert_many_inserts_new_activities(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_upsert_many_inserts_new_activities(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
 
     inserted = repo.upsert_many([_record("1"), _record("2")])
 
@@ -36,8 +36,8 @@ def test_upsert_many_inserts_new_activities(db_session: Session) -> None:
     assert repo.has_any() is True
 
 
-def test_upsert_many_does_not_duplicate_on_re_import(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_upsert_many_does_not_duplicate_on_re_import(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
     repo.upsert_many([_record("1")])
 
     inserted_again = repo.upsert_many([_record("1")])
@@ -45,8 +45,8 @@ def test_upsert_many_does_not_duplicate_on_re_import(db_session: Session) -> Non
     assert inserted_again == 0
 
 
-def test_latest_started_at_returns_the_max_start_time(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_latest_started_at_returns_the_max_start_time(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
     repo.upsert_many(
         [
             _record("1", datetime(2024, 6, 1, 7, 30)),
@@ -57,8 +57,8 @@ def test_latest_started_at_returns_the_max_start_time(db_session: Session) -> No
     assert repo.latest_started_at() == datetime(2024, 6, 5, 8, 0)
 
 
-def test_list_activities_returns_them_most_recent_first(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_list_activities_returns_them_most_recent_first(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
     repo.upsert_many(
         [
             _record("1", datetime(2024, 6, 1, 7, 30)),
@@ -71,8 +71,8 @@ def test_list_activities_returns_them_most_recent_first(db_session: Session) -> 
     assert [a.garmin_activity_id for a in activities] == ["2", "1"]
 
 
-def test_list_activities_filters_by_since_and_until(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_list_activities_filters_by_since_and_until(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
     repo.upsert_many(
         [
             _record("1", datetime(2024, 5, 1, 7, 30)),
@@ -86,8 +86,8 @@ def test_list_activities_filters_by_since_and_until(db_session: Session) -> None
     assert [a.garmin_activity_id for a in activities] == ["2"]
 
 
-def test_get_activity_returns_the_matching_record(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_get_activity_returns_the_matching_record(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
     repo.upsert_many([_record("1"), _record("2")])
 
     activity = repo.get_activity("2")
@@ -96,7 +96,32 @@ def test_get_activity_returns_the_matching_record(db_session: Session) -> None:
     assert activity.garmin_activity_id == "2"
 
 
-def test_get_activity_returns_none_when_missing(db_session: Session) -> None:
-    repo = SqlAlchemyActivityRepository(db_session)
+def test_get_activity_returns_none_when_missing(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyActivityRepository(db_session, user_id)
 
     assert repo.get_activity("does-not-exist") is None
+
+
+def test_a_users_activities_are_invisible_to_another_user(
+    db_session: Session, user_id: int, other_user_id: int
+) -> None:
+    SqlAlchemyActivityRepository(db_session, user_id).upsert_many([_record("1")])
+
+    other_repo = SqlAlchemyActivityRepository(db_session, other_user_id)
+
+    assert other_repo.has_any() is False
+    assert other_repo.list_activities() == []
+    assert other_repo.get_activity("1") is None
+
+
+def test_two_users_can_each_sync_the_same_garmin_activity_id(
+    db_session: Session, user_id: int, other_user_id: int
+) -> None:
+    """The uniqueness constraint is per-user (issue #28), not global."""
+    inserted_mine = SqlAlchemyActivityRepository(db_session, user_id).upsert_many([_record("1")])
+    inserted_theirs = SqlAlchemyActivityRepository(db_session, other_user_id).upsert_many(
+        [_record("1")]
+    )
+
+    assert inserted_mine == 1
+    assert inserted_theirs == 1
