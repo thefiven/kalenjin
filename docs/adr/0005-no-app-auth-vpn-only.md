@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0008
+---
+
 # Pas d'authentification applicative, accès restreint par VPN
 
 Kalenjin n'implémente aucun système de login/mot de passe. L'accès est protégé exclusivement au niveau réseau, via un VPN (Tailscale), même si l'app est déployée sur un VPS/k3s potentiellement joignable publiquement.
