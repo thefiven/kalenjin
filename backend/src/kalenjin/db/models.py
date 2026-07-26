@@ -27,10 +27,15 @@ class Activity(Base):
 
     __tablename__ = "activities"
     __table_args__ = (
-        UniqueConstraint("garmin_activity_id", name="uq_activities_garmin_activity_id"),
+        UniqueConstraint(
+            "user_id", "garmin_activity_id", name="uq_activities_user_id_garmin_activity_id"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
     garmin_activity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     sport: Mapped[str] = mapped_column(String, nullable=False)
     started_at: Mapped[datetime] = mapped_column(
@@ -48,10 +53,15 @@ class Rapport(Base):
 
     __tablename__ = "rapports"
     __table_args__ = (
-        UniqueConstraint("garmin_activity_id", name="uq_rapports_garmin_activity_id"),
+        UniqueConstraint(
+            "user_id", "garmin_activity_id", name="uq_rapports_user_id_garmin_activity_id"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
     garmin_activity_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     strengths: Mapped[str] = mapped_column(String, nullable=False)
     improvements: Mapped[str] = mapped_column(String, nullable=False)
@@ -71,6 +81,9 @@ class Objectif(Base):
     __tablename__ = "objectifs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
     sport: Mapped[str] = mapped_column(String, nullable=False)
     target_distance_meters: Mapped[float] = mapped_column(Float, nullable=False)
     target_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -84,6 +97,9 @@ class Plan(Base):
     __tablename__ = "plans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False, index=True
+    )
     objectif_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("objectifs.id"), nullable=False, index=True
     )

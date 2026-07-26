@@ -26,14 +26,16 @@ def _rapport(
     )
 
 
-def test_get_for_activity_returns_none_when_missing(db_session: Session) -> None:
-    repo = SqlAlchemyRapportRepository(db_session)
+def test_get_for_activity_returns_none_when_missing(db_session: Session, user_id: int) -> None:
+    repo = SqlAlchemyRapportRepository(db_session, user_id)
 
     assert repo.get_for_activity("does-not-exist") is None
 
 
-def test_save_then_get_for_activity_returns_the_saved_rapport(db_session: Session) -> None:
-    repo = SqlAlchemyRapportRepository(db_session)
+def test_save_then_get_for_activity_returns_the_saved_rapport(
+    db_session: Session, user_id: int
+) -> None:
+    repo = SqlAlchemyRapportRepository(db_session, user_id)
 
     repo.save(_rapport("1"))
 
@@ -45,8 +47,10 @@ def test_save_then_get_for_activity_returns_the_saved_rapport(db_session: Sessio
     assert rapport.generated_at == datetime(2024, 6, 1, 8, 0)
 
 
-def test_save_replaces_the_existing_rapport_for_the_same_activity(db_session: Session) -> None:
-    repo = SqlAlchemyRapportRepository(db_session)
+def test_save_replaces_the_existing_rapport_for_the_same_activity(
+    db_session: Session, user_id: int
+) -> None:
+    repo = SqlAlchemyRapportRepository(db_session, user_id)
     repo.save(_rapport("1", strengths="First version."))
 
     repo.save(_rapport("1", strengths="Regenerated version."))
@@ -54,3 +58,28 @@ def test_save_replaces_the_existing_rapport_for_the_same_activity(db_session: Se
     rapport = repo.get_for_activity("1")
     assert rapport is not None
     assert rapport.strengths == "Regenerated version."
+
+
+def test_a_users_rapport_is_invisible_to_another_user(
+    db_session: Session, user_id: int, other_user_id: int
+) -> None:
+    SqlAlchemyRapportRepository(db_session, user_id).save(_rapport("1"))
+
+    other_repo = SqlAlchemyRapportRepository(db_session, other_user_id)
+
+    assert other_repo.get_for_activity("1") is None
+    assert other_repo.list_recent(limit=10) == []
+
+
+def test_two_users_can_each_have_a_rapport_for_the_same_garmin_activity_id(
+    db_session: Session, user_id: int, other_user_id: int
+) -> None:
+    """The uniqueness constraint is per-user (issue #28), not global."""
+    SqlAlchemyRapportRepository(db_session, user_id).save(_rapport("1", strengths="Mine."))
+
+    SqlAlchemyRapportRepository(db_session, other_user_id).save(_rapport("1", strengths="Theirs."))
+
+    mine = SqlAlchemyRapportRepository(db_session, user_id).get_for_activity("1")
+    theirs = SqlAlchemyRapportRepository(db_session, other_user_id).get_for_activity("1")
+    assert mine is not None and mine.strengths == "Mine."
+    assert theirs is not None and theirs.strengths == "Theirs."

@@ -61,7 +61,7 @@ def test_main_wires_settings_into_garmin_client_and_syncs(
     monkeypatch.setenv("DATABASE_URL", "postgresql://x")
     cli_mocks.sync_activities.return_value = SyncResult(imported_count=3)
 
-    cli.main()
+    cli.main(["1"])
 
     cli_mocks.garmin_client_cls.assert_called_once_with(
         email="a@b.com",
@@ -71,7 +71,7 @@ def test_main_wires_settings_into_garmin_client_and_syncs(
     )
     cli_mocks.garmin_client_cls.return_value.login.assert_called_once()
     cli_mocks.make_engine.assert_called_once_with("postgresql://x")
-    cli_mocks.repository_cls.assert_called_once_with(cli_mocks.fake_session)
+    cli_mocks.repository_cls.assert_called_once_with(cli_mocks.fake_session, 1)
 
     call_args = cli_mocks.sync_activities.call_args
     assert call_args.args[0] is cli_mocks.garmin_client_cls.return_value
@@ -87,7 +87,20 @@ def test_main_does_not_require_a_gemini_api_key(
     monkeypatch.setenv("GARMIN_PASSWORD", "secret")
     monkeypatch.setenv("DATABASE_URL", "postgresql://x")
 
-    cli.main()  # must not raise even though GEMINI_API_KEY is absent
+    cli.main(["1"])  # must not raise even though GEMINI_API_KEY is absent
+
+
+def test_main_requires_exactly_one_user_id_argument() -> None:
+    with pytest.raises(SystemExit):
+        cli.main([])
+
+    with pytest.raises(SystemExit):
+        cli.main(["1", "2"])
+
+
+def test_main_requires_the_user_id_argument_to_be_an_integer() -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["not-a-number"])
 
 
 @dataclass

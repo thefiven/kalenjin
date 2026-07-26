@@ -34,16 +34,20 @@ def _to_record(activity: Activity) -> ActivityRecord:
 
 
 class SqlAlchemyActivityRepository:
-    """`sync.domain.ActivityRepository` backed by PostgreSQL via SQLAlchemy."""
+    """`sync.domain.ActivityRepository` backed by PostgreSQL via SQLAlchemy, scoped to
+    one user (issue #28) — every method only ever sees or writes that user's rows."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self._session = session
+        self._user_id = user_id
 
     def has_any(self) -> bool:
-        return self._session.execute(select(Activity.id).limit(1)).first() is not None
+        stmt = select(Activity.id).where(Activity.user_id == self._user_id).limit(1)
+        return self._session.execute(stmt).first() is not None
 
     def latest_started_at(self) -> datetime | None:
-        return self._session.execute(select(func.max(Activity.started_at))).scalar_one_or_none()
+        stmt = select(func.max(Activity.started_at)).where(Activity.user_id == self._user_id)
+        return self._session.execute(stmt).scalar_one_or_none()
 
     def upsert_many(self, activities: list[ActivityRecord]) -> int:
         if not activities:
@@ -54,6 +58,7 @@ class SqlAlchemyActivityRepository:
             stmt = (
                 insert(Activity)
                 .values(
+                    user_id=self._user_id,
                     garmin_activity_id=activity.garmin_activity_id,
                     sport=activity.sport,
                     started_at=activity.started_at,
@@ -63,7 +68,7 @@ class SqlAlchemyActivityRepository:
                     raw_payload=activity.raw_payload,
                     created_at=datetime.now(),
                 )
-                .on_conflict_do_nothing(constraint="uq_activities_garmin_activity_id")
+                .on_conflict_do_nothing(constraint="uq_activities_user_id_garmin_activity_id")
                 .returning(Activity.id)
             )
             if self._session.execute(stmt).first() is not None:
@@ -72,7 +77,11 @@ class SqlAlchemyActivityRepository:
         return inserted
 
     def list_activities(self, date_range: DateRange = DateRange()) -> list[ActivityRecord]:
-        stmt = select(Activity).order_by(Activity.started_at.desc())
+        stmt = (
+            select(Activity)
+            .where(Activity.user_id == self._user_id)
+            .order_by(Activity.started_at.desc())
+        )
         if date_range.since is not None:
             stmt = stmt.where(Activity.started_at >= datetime.combine(date_range.since, time.min))
         if date_range.until is not None:
@@ -82,7 +91,10 @@ class SqlAlchemyActivityRepository:
         return [_to_record(activity) for activity in activities]
 
     def get_activity(self, garmin_activity_id: str) -> ActivityRecord | None:
-        stmt = select(Activity).where(Activity.garmin_activity_id == garmin_activity_id)
+        stmt = select(Activity).where(
+            Activity.user_id == self._user_id,
+            Activity.garmin_activity_id == garmin_activity_id,
+        )
         activity = self._session.execute(stmt).scalar_one_or_none()
         return None if activity is None else _to_record(activity)
 
@@ -100,15 +112,18 @@ def _to_rapport(rapport: Rapport) -> RapportRecord:
 
 
 class SqlAlchemyRapportRepository:
-    """`rapport.domain.RapportRepository` backed by PostgreSQL via SQLAlchemy."""
+    """`rapport.domain.RapportRepository` backed by PostgreSQL via SQLAlchemy, scoped
+    to one user (issue #28)."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self._session = session
+        self._user_id = user_id
 
     def save(self, rapport: RapportRecord) -> None:
         stmt = (
             insert(Rapport)
             .values(
+                user_id=self._user_id,
                 garmin_activity_id=rapport.garmin_activity_id,
                 strengths=rapport.strengths,
                 improvements=rapport.improvements,
@@ -118,7 +133,7 @@ class SqlAlchemyRapportRepository:
                 flag=rapport.flag,
             )
             .on_conflict_do_update(
-                constraint="uq_rapports_garmin_activity_id",
+                constraint="uq_rapports_user_id_garmin_activity_id",
                 set_={
                     "strengths": rapport.strengths,
                     "improvements": rapport.improvements,
@@ -132,12 +147,19 @@ class SqlAlchemyRapportRepository:
         self._session.execute(stmt)
 
     def get_for_activity(self, garmin_activity_id: str) -> RapportRecord | None:
-        stmt = select(Rapport).where(Rapport.garmin_activity_id == garmin_activity_id)
+        stmt = select(Rapport).where(
+            Rapport.user_id == self._user_id, Rapport.garmin_activity_id == garmin_activity_id
+        )
         rapport = self._session.execute(stmt).scalar_one_or_none()
         return None if rapport is None else _to_rapport(rapport)
 
     def list_recent(self, limit: int) -> list[RapportRecord]:
-        stmt = select(Rapport).order_by(Rapport.generated_at.desc()).limit(limit)
+        stmt = (
+            select(Rapport)
+            .where(Rapport.user_id == self._user_id)
+            .order_by(Rapport.generated_at.desc())
+            .limit(limit)
+        )
         rapports = self._session.execute(stmt).scalars().all()
         return [_to_rapport(r) for r in rapports]
 
@@ -154,13 +176,16 @@ def _to_objectif(objectif: Objectif) -> ObjectifRecord:
 
 
 class SqlAlchemyObjectifRepository:
-    """`plan.domain.ObjectifRepository` backed by PostgreSQL via SQLAlchemy."""
+    """`plan.domain.ObjectifRepository` backed by PostgreSQL via SQLAlchemy, scoped to
+    one user (issue #28)."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self._session = session
+        self._user_id = user_id
 
     def save(self, objectif: ObjectifRecord) -> ObjectifRecord:
         row = Objectif(
+            user_id=self._user_id,
             sport=objectif.sport,
             target_distance_meters=objectif.target_distance_meters,
             target_date=objectif.target_date,
@@ -172,7 +197,12 @@ class SqlAlchemyObjectifRepository:
         return _to_objectif(row)
 
     def get_active(self) -> ObjectifRecord | None:
-        stmt = select(Objectif).order_by(Objectif.created_at.desc(), Objectif.id.desc()).limit(1)
+        stmt = (
+            select(Objectif)
+            .where(Objectif.user_id == self._user_id)
+            .order_by(Objectif.created_at.desc(), Objectif.id.desc())
+            .limit(1)
+        )
         row = self._session.execute(stmt).scalar_one_or_none()
         return None if row is None else _to_objectif(row)
 
@@ -213,13 +243,19 @@ def _seance_row(seance: SeanceRecord, plan_id: int) -> Seance:
 
 
 class SqlAlchemyPlanRepository:
-    """`plan.domain.PlanRepository` backed by PostgreSQL via SQLAlchemy."""
+    """`plan.domain.PlanRepository` backed by PostgreSQL via SQLAlchemy, scoped to one
+    user (issue #28). `Seance` rows aren't scoped directly — they're only ever reached
+    through an already user-scoped `Plan`, so `plan_id` alone is enough to keep them
+    isolated."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, user_id: int) -> None:
         self._session = session
+        self._user_id = user_id
 
     def save(self, plan: PlanRecord) -> PlanRecord:
-        plan_row = Plan(objectif_id=plan.objectif_id, created_at=plan.created_at)
+        plan_row = Plan(
+            user_id=self._user_id, objectif_id=plan.objectif_id, created_at=plan.created_at
+        )
         self._session.add(plan_row)
         self._session.flush()
 
@@ -235,7 +271,12 @@ class SqlAlchemyPlanRepository:
         )
 
     def get_active(self) -> PlanRecord | None:
-        plan_stmt = select(Plan).order_by(Plan.created_at.desc(), Plan.id.desc()).limit(1)
+        plan_stmt = (
+            select(Plan)
+            .where(Plan.user_id == self._user_id)
+            .order_by(Plan.created_at.desc(), Plan.id.desc())
+            .limit(1)
+        )
         plan_row = self._session.execute(plan_stmt).scalar_one_or_none()
         if plan_row is None:
             return None

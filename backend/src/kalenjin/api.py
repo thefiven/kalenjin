@@ -98,24 +98,6 @@ def _get_db_session(db_config: DbConfig = Depends(get_db_config)) -> Iterator[Se
         yield session
 
 
-def get_activity_repository(
-    session: Session = Depends(_get_db_session),
-) -> ActivityRepository:
-    return SqlAlchemyActivityRepository(session)
-
-
-def get_rapport_repository(session: Session = Depends(_get_db_session)) -> RapportRepository:
-    return SqlAlchemyRapportRepository(session)
-
-
-def get_objectif_repository(session: Session = Depends(_get_db_session)) -> ObjectifRepository:
-    return SqlAlchemyObjectifRepository(session)
-
-
-def get_plan_repository(session: Session = Depends(_get_db_session)) -> PlanRepository:
-    return SqlAlchemyPlanRepository(session)
-
-
 def get_user_repository(session: Session = Depends(_get_db_session)) -> UserRepository:
     return SqlAlchemyUserRepository(session)
 
@@ -140,14 +122,50 @@ def get_current_user(
     session_codec: SessionCodec = Depends(get_session_codec),
 ) -> UserRecord:
     """Every non-public endpoint depends on this (ADR-0008), superseding ADR-0005's
-    VPN-only stance now that the app is multi-tenant. Data isn't yet scoped by the
-    returned user — that's issue #28 — this only gates access."""
+    VPN-only stance now that the app is multi-tenant. Activities, objectifs, plans,
+    and rapports are all scoped to the returned user's id (issue #28)."""
     token = request.cookies.get(SESSION_COOKIE_NAME)
     user_id = session_codec.verify(token) if token else None
     user = user_repo.find_by_id(user_id) if user_id is not None else None
     if user is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
+
+
+def _require_user_id(user: UserRecord) -> int:
+    """A signed-in `UserRecord` always has an id — it only ever comes from a row
+    already persisted (`get_current_user`'s `find_by_id`). Narrows `int | None` to
+    `int` once for every user-scoped repository provider below."""
+    assert user.id is not None
+    return user.id
+
+
+def get_activity_repository(
+    session: Session = Depends(_get_db_session),
+    user: UserRecord = Depends(get_current_user),
+) -> ActivityRepository:
+    return SqlAlchemyActivityRepository(session, _require_user_id(user))
+
+
+def get_rapport_repository(
+    session: Session = Depends(_get_db_session),
+    user: UserRecord = Depends(get_current_user),
+) -> RapportRepository:
+    return SqlAlchemyRapportRepository(session, _require_user_id(user))
+
+
+def get_objectif_repository(
+    session: Session = Depends(_get_db_session),
+    user: UserRecord = Depends(get_current_user),
+) -> ObjectifRepository:
+    return SqlAlchemyObjectifRepository(session, _require_user_id(user))
+
+
+def get_plan_repository(
+    session: Session = Depends(_get_db_session),
+    user: UserRecord = Depends(get_current_user),
+) -> PlanRepository:
+    return SqlAlchemyPlanRepository(session, _require_user_id(user))
 
 
 def get_garmin_push_client(
@@ -396,7 +414,6 @@ def trigger_sync(
     plan_repo: PlanRepository = Depends(get_plan_repository),
     garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
-    user: UserRecord = Depends(get_current_user),
 ) -> SyncResponse:
     orchestrator = SyncOrchestrator(source, repo, objectif_repo, plan_repo, garmin, llm)
     result = orchestrator.run(today=date.today())
@@ -408,7 +425,6 @@ def list_activities(
     since: date | None = None,
     until: date | None = None,
     repo: ActivityRepository = Depends(get_activity_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> list[ActivityResponse]:
     activities = repo.list_activities(DateRange(since=since, until=until))
     return [_to_response(a) for a in activities]
@@ -418,7 +434,6 @@ def list_activities(
 def get_activity(
     garmin_activity_id: str,
     repo: ActivityRepository = Depends(get_activity_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> ActivityResponse:
     activity = repo.get_activity(garmin_activity_id)
     if activity is None:
@@ -435,7 +450,6 @@ def generate_activity_rapport(
     plan_repo: PlanRepository = Depends(get_plan_repository),
     garmin: GarminPushClient = Depends(get_garmin_push_client),
     llm: LLMClient = Depends(get_llm_client),
-    user: UserRecord = Depends(get_current_user),
 ) -> RapportResponse:
     orchestrator = RapportOrchestrator(
         repo, rapport_repo, objectif_repo, plan_repo, garmin, llm, RECENT_RAPPORTS_FOR_ADJUSTMENT
@@ -450,7 +464,6 @@ def generate_activity_rapport(
 def get_activity_rapport(
     garmin_activity_id: str,
     rapport_repo: RapportRepository = Depends(get_rapport_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> RapportResponse:
     rapport = rapport_repo.get_for_activity(garmin_activity_id)
     if rapport is None:
@@ -465,7 +478,6 @@ def create_objectif(
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
     llm: LLMClient = Depends(get_llm_client),
-    user: UserRecord = Depends(get_current_user),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
     today = date.today()
@@ -496,7 +508,6 @@ def create_objectif(
 @app.get("/objectif", response_model=ObjectifResponse)
 def get_active_objectif(
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> ObjectifResponse:
     objectif = objectif_repo.get_active()
     if objectif is None:
@@ -507,7 +518,6 @@ def get_active_objectif(
 @app.get("/plan", response_model=PlanResponse)
 def get_active_plan(
     plan_repo: PlanRepository = Depends(get_plan_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> PlanResponse:
     plan = plan_repo.get_active()
     if plan is None:
@@ -520,7 +530,6 @@ def update_seance(
     seance_id: int,
     body: SeanceUpdateRequest,
     plan_repo: PlanRepository = Depends(get_plan_repository),
-    user: UserRecord = Depends(get_current_user),
 ) -> SeanceResponse:
     """Manual edit of a séance from the dashboard/agenda (issue #4)."""
     plan = plan_repo.get_active()

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
@@ -56,14 +57,22 @@ def _coarse_seance(week_start: date) -> SeanceRecord:
     )
 
 
+def _replace_plan_id(seance: SeanceRecord, plan_id: int | None) -> SeanceRecord:
+    return replace(seance, plan_id=plan_id)
+
+
 class TestObjectifRepository:
-    def test_get_active_returns_none_when_no_objectif_exists(self, db_session: Session) -> None:
-        repo = SqlAlchemyObjectifRepository(db_session)
+    def test_get_active_returns_none_when_no_objectif_exists(
+        self, db_session: Session, user_id: int
+    ) -> None:
+        repo = SqlAlchemyObjectifRepository(db_session, user_id)
 
         assert repo.get_active() is None
 
-    def test_save_assigns_an_id_and_get_active_returns_it(self, db_session: Session) -> None:
-        repo = SqlAlchemyObjectifRepository(db_session)
+    def test_save_assigns_an_id_and_get_active_returns_it(
+        self, db_session: Session, user_id: int
+    ) -> None:
+        repo = SqlAlchemyObjectifRepository(db_session, user_id)
 
         saved = repo.save(_objectif())
 
@@ -74,9 +83,9 @@ class TestObjectifRepository:
         assert active.target_distance_meters == 10_000
 
     def test_get_active_returns_the_most_recently_created_objectif(
-        self, db_session: Session
+        self, db_session: Session, user_id: int
     ) -> None:
-        repo = SqlAlchemyObjectifRepository(db_session)
+        repo = SqlAlchemyObjectifRepository(db_session, user_id)
         repo.save(_objectif(target_date=date(2026, 6, 1)))
         second = repo.save(_objectif(target_date=date(2026, 9, 1)))
 
@@ -85,11 +94,22 @@ class TestObjectifRepository:
         assert active is not None
         assert active.id == second.id
 
+    def test_a_users_objectif_is_invisible_to_another_user(
+        self, db_session: Session, user_id: int, other_user_id: int
+    ) -> None:
+        SqlAlchemyObjectifRepository(db_session, user_id).save(_objectif())
+
+        other_repo = SqlAlchemyObjectifRepository(db_session, other_user_id)
+
+        assert other_repo.get_active() is None
+
 
 class TestPlanRepository:
-    def test_save_persists_the_plan_and_its_seances(self, db_session: Session) -> None:
-        objectif_repo = SqlAlchemyObjectifRepository(db_session)
-        plan_repo = SqlAlchemyPlanRepository(db_session)
+    def test_save_persists_the_plan_and_its_seances(
+        self, db_session: Session, user_id: int
+    ) -> None:
+        objectif_repo = SqlAlchemyObjectifRepository(db_session, user_id)
+        plan_repo = SqlAlchemyPlanRepository(db_session, user_id)
         objectif = objectif_repo.save(_objectif())
 
         assert objectif.id is not None
@@ -111,10 +131,10 @@ class TestPlanRepository:
         assert all(s.plan_id == plan.id for s in plan.seances)
 
     def test_get_active_returns_the_plan_for_the_most_recent_objectif(
-        self, db_session: Session
+        self, db_session: Session, user_id: int
     ) -> None:
-        objectif_repo = SqlAlchemyObjectifRepository(db_session)
-        plan_repo = SqlAlchemyPlanRepository(db_session)
+        objectif_repo = SqlAlchemyObjectifRepository(db_session, user_id)
+        plan_repo = SqlAlchemyPlanRepository(db_session, user_id)
         objectif = objectif_repo.save(_objectif())
         assert objectif.id is not None
         plan_repo.save(
@@ -132,9 +152,11 @@ class TestPlanRepository:
         assert active.objectif_id == objectif.id
         assert len(active.seances) == 1
 
-    def test_update_seances_updates_fields_in_place(self, db_session: Session) -> None:
-        objectif_repo = SqlAlchemyObjectifRepository(db_session)
-        plan_repo = SqlAlchemyPlanRepository(db_session)
+    def test_update_seances_updates_fields_in_place(
+        self, db_session: Session, user_id: int
+    ) -> None:
+        objectif_repo = SqlAlchemyObjectifRepository(db_session, user_id)
+        plan_repo = SqlAlchemyPlanRepository(db_session, user_id)
         objectif = objectif_repo.save(_objectif())
         assert objectif.id is not None
         plan = plan_repo.save(
@@ -147,17 +169,15 @@ class TestPlanRepository:
         )
         seance = plan.seances[0]
 
-        from dataclasses import replace
-
         plan_repo.update_seances([replace(seance, seance_type="easy", distance_meters=1234)])
 
         active = plan_repo.get_active()
         assert active is not None
         assert active.seances[0].distance_meters == 1234
 
-    def test_replace_seances_removes_and_inserts(self, db_session: Session) -> None:
-        objectif_repo = SqlAlchemyObjectifRepository(db_session)
-        plan_repo = SqlAlchemyPlanRepository(db_session)
+    def test_replace_seances_removes_and_inserts(self, db_session: Session, user_id: int) -> None:
+        objectif_repo = SqlAlchemyObjectifRepository(db_session, user_id)
+        plan_repo = SqlAlchemyPlanRepository(db_session, user_id)
         objectif = objectif_repo.save(_objectif())
         assert objectif.id is not None
         plan = plan_repo.save(
@@ -172,7 +192,7 @@ class TestPlanRepository:
         assert coarse.id is not None
         new_seance = _detailed_seance(date(2026, 1, 12), date(2026, 1, 12))
 
-        inserted = plan_repo.replace_seances([coarse.id], [replace_plan_id(new_seance, plan.id)])
+        inserted = plan_repo.replace_seances([coarse.id], [_replace_plan_id(new_seance, plan.id)])
 
         assert len(inserted) == 1
         assert inserted[0].id is not None
@@ -180,8 +200,22 @@ class TestPlanRepository:
         assert active is not None
         assert [s.id for s in active.seances] == [inserted[0].id]
 
+    def test_a_users_plan_is_invisible_to_another_user(
+        self, db_session: Session, user_id: int, other_user_id: int
+    ) -> None:
+        objectif_repo = SqlAlchemyObjectifRepository(db_session, user_id)
+        plan_repo = SqlAlchemyPlanRepository(db_session, user_id)
+        objectif = objectif_repo.save(_objectif())
+        assert objectif.id is not None
+        plan_repo.save(
+            PlanRecord(
+                id=None,
+                objectif_id=objectif.id,
+                created_at=datetime(2026, 1, 1, 8, 0),
+                seances=[_detailed_seance(date(2026, 1, 5), date(2026, 1, 5))],
+            )
+        )
 
-def replace_plan_id(seance: SeanceRecord, plan_id: int | None) -> SeanceRecord:
-    from dataclasses import replace
+        other_plan_repo = SqlAlchemyPlanRepository(db_session, other_user_id)
 
-    return replace(seance, plan_id=plan_id)
+        assert other_plan_repo.get_active() is None
