@@ -1,7 +1,22 @@
+import { cookies } from "next/headers";
+import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import type { DateRange } from "@/lib/date-range";
 import type { Activity, Objectif, Plan, Rapport, Seance } from "@/lib/types";
 
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
+
+// The frontend's own SSR fetches and Server Actions run server-to-server against the
+// API — they don't go through the browser, so the session cookie isn't attached
+// automatically the way it is for a client-side `fetch`. Forwarding it manually here
+// is what lets the backend's `get_current_user` gate (ADR-0008) recognize the
+// logged-in visitor. This assumes the cookie is visible to both origins (true on
+// localhost regardless of port, since cookie scoping ignores port — see proxy.ts);
+// a production deployment on separate registrable domains needs a shared cookie
+// `Domain` instead.
+async function authHeaders(): Promise<HeadersInit> {
+  const session = (await cookies()).get(SESSION_COOKIE_NAME);
+  return session ? { Cookie: `${SESSION_COOKIE_NAME}=${session.value}` } : {};
+}
 
 export async function fetchActivities(range?: DateRange): Promise<Activity[]> {
   const search = new URLSearchParams();
@@ -10,6 +25,7 @@ export async function fetchActivities(range?: DateRange): Promise<Activity[]> {
   const query = search.toString();
 
   const res = await fetch(`${API_URL}/activities${query ? `?${query}` : ""}`, {
+    headers: await authHeaders(),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -20,6 +36,7 @@ export async function fetchActivities(range?: DateRange): Promise<Activity[]> {
 
 export async function fetchActivity(garminActivityId: string): Promise<Activity | null> {
   const res = await fetch(`${API_URL}/activities/${garminActivityId}`, {
+    headers: await authHeaders(),
     cache: "no-store",
   });
   if (res.status === 404) return null;
@@ -31,6 +48,7 @@ export async function fetchActivity(garminActivityId: string): Promise<Activity 
 
 export async function fetchRapport(garminActivityId: string): Promise<Rapport | null> {
   const res = await fetch(`${API_URL}/activities/${garminActivityId}/rapport`, {
+    headers: await authHeaders(),
     cache: "no-store",
   });
   if (res.status === 404) return null;
@@ -41,7 +59,7 @@ export async function fetchRapport(garminActivityId: string): Promise<Rapport | 
 }
 
 export async function fetchObjectif(): Promise<Objectif | null> {
-  const res = await fetch(`${API_URL}/objectif`, { cache: "no-store" });
+  const res = await fetch(`${API_URL}/objectif`, { headers: await authHeaders(), cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(`Failed to fetch the active objectif: ${res.status}`);
@@ -50,7 +68,7 @@ export async function fetchObjectif(): Promise<Objectif | null> {
 }
 
 export async function fetchPlan(): Promise<Plan | null> {
-  const res = await fetch(`${API_URL}/plan`, { cache: "no-store" });
+  const res = await fetch(`${API_URL}/plan`, { headers: await authHeaders(), cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) {
     throw new Error(`Failed to fetch the active plan: ${res.status}`);
@@ -68,7 +86,7 @@ export interface CreateObjectifInput {
 export async function createObjectif(input: CreateObjectifInput): Promise<Plan> {
   const res = await fetch(`${API_URL}/objectif`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
     cache: "no-store",
   });
@@ -87,7 +105,7 @@ export interface UpdateSeanceInput {
 export async function updateSeance(seanceId: number, input: UpdateSeanceInput): Promise<Seance> {
   const res = await fetch(`${API_URL}/plan/seances/${seanceId}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify(input),
     cache: "no-store",
   });

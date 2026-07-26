@@ -12,10 +12,14 @@ dependencies = [
     "garminconnect>=0.3.5",
     "pydantic-settings>=2.4",
     "google-genai>=1.0",
+    "cryptography>=43.0",
+    "httpx>=0.27",
+    "itsdangerous>=2.2",
 ]
 
 [project.scripts]
 kalenjin-sync = "kalenjin.cli:main"
+kalenjin-invite = "kalenjin.cli:invite_main"
 
 [project.optional-dependencies]
 dev = [
@@ -23,7 +27,6 @@ dev = [
     "pytest-cov>=5.0",
     "mypy>=1.11",
     "ruff>=0.6.9",
-    "httpx>=0.27",
 ]
 
 [build-system]

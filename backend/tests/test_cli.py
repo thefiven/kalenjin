@@ -88,3 +88,53 @@ def test_main_does_not_require_a_gemini_api_key(
     monkeypatch.setenv("DATABASE_URL", "postgresql://x")
 
     cli.main()  # must not raise even though GEMINI_API_KEY is absent
+
+
+@dataclass
+class _InviteCliMocks:
+    make_engine: MagicMock
+    repository_cls: MagicMock
+    fake_session: MagicMock
+
+
+@pytest.fixture
+def invite_cli_mocks() -> Iterator[_InviteCliMocks]:
+    with (
+        patch("kalenjin.cli.SqlAlchemyUserRepository") as repository_cls,
+        patch("kalenjin.cli.session_scope") as session_scope,
+        patch("kalenjin.cli.make_session_factory"),
+        patch("kalenjin.cli.make_engine") as make_engine,
+    ):
+        fake_session = MagicMock()
+
+        @contextmanager
+        def fake_session_scope(_factory: Any) -> Any:
+            yield fake_session
+
+        session_scope.side_effect = fake_session_scope
+
+        yield _InviteCliMocks(
+            make_engine=make_engine, repository_cls=repository_cls, fake_session=fake_session
+        )
+
+
+def test_invite_main_adds_the_email_to_the_allowlist(
+    invite_cli_mocks: _InviteCliMocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x")
+
+    cli.invite_main(["friend@example.com"])
+
+    invite_cli_mocks.make_engine.assert_called_once_with("postgresql://x")
+    invite_cli_mocks.repository_cls.assert_called_once_with(invite_cli_mocks.fake_session)
+    invite_cli_mocks.repository_cls.return_value.add_to_allowlist.assert_called_once_with(
+        "friend@example.com"
+    )
+
+
+def test_invite_main_requires_exactly_one_email_argument() -> None:
+    with pytest.raises(SystemExit):
+        cli.invite_main([])
+
+    with pytest.raises(SystemExit):
+        cli.invite_main(["a@b.com", "extra-arg"])
