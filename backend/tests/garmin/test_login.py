@@ -2,7 +2,11 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from garminconnect.exceptions import GarminConnectAuthenticationError
+from garminconnect.exceptions import (
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+    GarminConnectTooManyRequestsError,
+)
 
 from kalenjin.garmin.login import (
     GarminAuthError,
@@ -109,6 +113,24 @@ def test_completing_mfa_with_a_wrong_code_raises_and_still_consumes_the_pending_
     # The pending login is consumed even on failure — retrying needs a fresh initiate.
     with pytest.raises(GarminAuthError):
         complete_garmin_mfa(pending.pending_login_id, "123456", store, user_id=1)
+
+
+@patch("kalenjin.garmin.login.Garmin")
+def test_being_rate_limited_by_garmin_raises_a_garmin_auth_error(garmin_cls: MagicMock) -> None:
+    garmin_cls.return_value.login.side_effect = GarminConnectTooManyRequestsError("slow down")
+    store = PendingGarminLoginStore()
+
+    with pytest.raises(GarminAuthError):
+        initiate_garmin_login("a@b.com", "secret", store, user_id=1)
+
+
+@patch("kalenjin.garmin.login.Garmin")
+def test_a_transport_failure_raises_a_garmin_auth_error(garmin_cls: MagicMock) -> None:
+    garmin_cls.return_value.login.side_effect = GarminConnectConnectionError("network blip")
+    store = PendingGarminLoginStore()
+
+    with pytest.raises(GarminAuthError):
+        initiate_garmin_login("a@b.com", "secret", store, user_id=1)
 
 
 @patch("kalenjin.garmin.login.Garmin")

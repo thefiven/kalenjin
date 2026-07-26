@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date, datetime
 from functools import lru_cache
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -162,9 +163,13 @@ def get_activity_source(
     try:
         client.login()
     except GarminConnectAuthenticationError as exc:
+        # Could be an expired/rejected session, a changed Garmin password, or (since no
+        # prompt_mfa/return_on_mfa is passed here) a fresh MFA challenge — garminconnect
+        # doesn't distinguish these outcomes, so the message stays generic rather than
+        # guessing which one it was.
         raise HTTPException(
             status_code=400,
-            detail="Your Garmin session needs to be reconnected (MFA required again)",
+            detail="Your Garmin session needs to be reconnected — connect your account again",
         ) from exc
 
     user_repo.set_garmin_session(_require_user_id(user), encrypt(client.dump_session(), key))
@@ -478,7 +483,7 @@ class GarminMfaCodeRequest(BaseModel):
 
 
 class ConnectGarminResponse(BaseModel):
-    status: str
+    status: Literal["connected", "mfa_required"]
     pending_login_id: str | None = None
 
 

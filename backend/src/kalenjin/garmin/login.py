@@ -5,15 +5,29 @@ import uuid
 from dataclasses import dataclass, field
 
 from garminconnect import Garmin
-from garminconnect.exceptions import GarminConnectAuthenticationError
+from garminconnect.exceptions import (
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+    GarminConnectTooManyRequestsError,
+)
 
 DEFAULT_PENDING_LOGIN_TTL_SECONDS = 5 * 60
 
+# Every way `garminconnect`'s login/resume_login calls are documented to fail: wrong
+# credentials, Garmin's SSO rate-limiting logins, or a transport/HTML-challenge
+# failure. Caught together so none of them surfaces as an unhandled 500 — the caller
+# always gets a clear, catchable `GarminAuthError` instead.
+_GARMIN_LOGIN_ERRORS = (
+    GarminConnectAuthenticationError,
+    GarminConnectTooManyRequestsError,
+    GarminConnectConnectionError,
+)
+
 
 class GarminAuthError(Exception):
-    """Wraps every way a Garmin login attempt can fail — wrong credentials, a
-    rejected MFA code, or an expired/unknown pending login — so no
-    `garminconnect` exception type leaks past this module."""
+    """Wraps every way a Garmin login attempt can fail — wrong credentials, rate
+    limiting, a transport failure, a rejected MFA code, or an expired/unknown
+    pending login — so no `garminconnect` exception type leaks past this module."""
 
 
 @dataclass(frozen=True)
@@ -90,7 +104,7 @@ def initiate_garmin_login(
     client = Garmin(email=email, password=password, return_on_mfa=True)
     try:
         mfa_status, _ = client.login()
-    except GarminConnectAuthenticationError as exc:
+    except _GARMIN_LOGIN_ERRORS as exc:
         raise GarminAuthError(str(exc)) from exc
 
     if mfa_status == "needs_mfa":
@@ -108,7 +122,7 @@ def complete_garmin_mfa(
         )
     try:
         pending.client.resume_login({}, mfa_code)
-    except GarminConnectAuthenticationError as exc:
+    except _GARMIN_LOGIN_ERRORS as exc:
         raise GarminAuthError(str(exc)) from exc
     return GarminLoginSuccess(
         email=pending.email,

@@ -115,6 +115,13 @@ export async function updateSeance(seanceId: number, input: UpdateSeanceInput): 
   return res.json();
 }
 
+async function _errorFromResponse(res: Response, fallback: string): Promise<string> {
+  const body: unknown = await res.json().catch(() => null);
+  const detail =
+    body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
+  return detail ?? fallback;
+}
+
 export type SetGeminiApiKeyResult = { success: true } | { success: false; error: string };
 
 export async function setGeminiApiKey(apiKey: string): Promise<SetGeminiApiKeyResult> {
@@ -126,23 +133,13 @@ export async function setGeminiApiKey(apiKey: string): Promise<SetGeminiApiKeyRe
   });
   if (res.ok) return { success: true };
 
-  const body: unknown = await res.json().catch(() => null);
-  const detail =
-    body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
-  return { success: false, error: detail ?? `Failed to save API key: ${res.status}` };
+  return { success: false, error: await _errorFromResponse(res, `Failed to save API key: ${res.status}`) };
 }
 
 export type ConnectGarminResult =
   | { success: true; status: "connected" }
   | { success: true; status: "mfa_required"; pendingLoginId: string }
   | { success: false; error: string };
-
-async function _errorFromResponse(res: Response, fallback: string): Promise<string> {
-  const body: unknown = await res.json().catch(() => null);
-  const detail =
-    body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
-  return detail ?? fallback;
-}
 
 export async function connectGarminAccount(
   email: string,
@@ -161,7 +158,10 @@ export async function connectGarminAccount(
     };
   }
 
-  const data = (await res.json()) as { status: string; pending_login_id: string | null };
+  const data = (await res.json()) as {
+    status: "connected" | "mfa_required";
+    pending_login_id: string | null;
+  };
   if (data.status === "mfa_required") {
     if (!data.pending_login_id) {
       return { success: false, error: "Garmin login requires MFA but returned no pending login" };
