@@ -259,6 +259,16 @@ class FakeUserRepository:
         idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
         self._users[idx] = replace(self._users[idx], gemini_api_key_encrypted=encrypted_key)
 
+    def set_garmin_credentials(self, user_id: int, email: str, encrypted_password: str) -> None:
+        idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
+        self._users[idx] = replace(
+            self._users[idx], garmin_email=email, garmin_password_encrypted=encrypted_password
+        )
+
+    def set_garmin_session(self, user_id: int, encrypted_session: str) -> None:
+        idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
+        self._users[idx] = replace(self._users[idx], garmin_session_encrypted=encrypted_session)
+
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
     return {

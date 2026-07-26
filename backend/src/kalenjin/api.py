@@ -8,14 +8,14 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
+from garminconnect.exceptions import GarminConnectAuthenticationError
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from kalenjin.auth.domain import GoogleIdentityVerifier, UserRecord, UserRepository
 from kalenjin.auth.google_client import GoogleAuthError, GoogleOAuthClient
 from kalenjin.auth.session import DEFAULT_SESSION_MAX_AGE_SECONDS, SessionCodec
-from kalenjin.cli import prompt_mfa_via_console
-from kalenjin.config.settings import AuthConfig, DbConfig, EncryptionConfig, GarminConfig
+from kalenjin.config.settings import AuthConfig, DbConfig, EncryptionConfig
 from kalenjin.db.repository import (
     SqlAlchemyActivityRepository,
     SqlAlchemyObjectifRepository,
@@ -26,6 +26,14 @@ from kalenjin.db.repository import (
 from kalenjin.db.session import make_engine, make_session_factory, session_scope
 from kalenjin.garmin.client import GarminActivityClient
 from kalenjin.garmin.domain import GarminSessionClient
+from kalenjin.garmin.login import (
+    GarminAuthError,
+    GarminLoginSuccess,
+    GarminMfaRequired,
+    PendingGarminLoginStore,
+    complete_garmin_mfa,
+    initiate_garmin_login,
+)
 from kalenjin.llm.domain import LLMClient
 from kalenjin.llm.gemini_client import GeminiLLMClient, validate_gemini_api_key
 from kalenjin.plan.domain import (
@@ -54,11 +62,6 @@ app = FastAPI(title="Kalenjin")
 
 
 @lru_cache
-def get_garmin_config() -> GarminConfig:
-    return GarminConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
-
-
-@lru_cache
 def get_db_config() -> DbConfig:
     return DbConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
@@ -73,17 +76,9 @@ def get_encryption_config() -> EncryptionConfig:
     return EncryptionConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
 
 
-def get_activity_source(
-    garmin_config: GarminConfig = Depends(get_garmin_config),
-) -> GarminSessionClient:
-    client = GarminActivityClient(
-        email=garmin_config.garmin_email,
-        password=garmin_config.garmin_password,
-        tokenstore=garmin_config.garmin_tokenstore,
-        prompt_mfa=prompt_mfa_via_console,
-    )
-    client.login()
-    return client
+@lru_cache
+def get_pending_garmin_login_store() -> PendingGarminLoginStore:
+    return PendingGarminLoginStore()
 
 
 def _get_db_session(db_config: DbConfig = Depends(get_db_config)) -> Iterator[Session]:
@@ -139,6 +134,41 @@ def _require_user_id(user: UserRecord) -> int:
     `int` once for every user-scoped repository provider below."""
     assert user.id is not None
     return user.id
+
+
+def get_activity_source(
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+) -> GarminSessionClient:
+    """Each user's own Garmin session (issue #30, ADR-0006), never the old shared
+    `GarminConfig`/`GARMIN_EMAIL`/`GARMIN_PASSWORD` — those are retired for
+    authenticated requests. Prefers the user's stored session tokens (no repeat
+    login, no risk of a fresh MFA prompt); a missing/rejected session falls back to
+    a password login, persisting whatever session comes out of it so the next call
+    can resume from there again."""
+    if user.garmin_email is None or user.garmin_password_encrypted is None:
+        raise HTTPException(status_code=400, detail="Connect your Garmin account first")
+
+    key = encryption_config.secret_encryption_key
+    password = decrypt(user.garmin_password_encrypted, key)
+    session_tokens = (
+        decrypt(user.garmin_session_encrypted, key) if user.garmin_session_encrypted else None
+    )
+
+    client = GarminActivityClient(
+        email=user.garmin_email, password=password, tokenstore=session_tokens or ""
+    )
+    try:
+        client.login()
+    except GarminConnectAuthenticationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Your Garmin session needs to be reconnected (MFA required again)",
+        ) from exc
+
+    user_repo.set_garmin_session(_require_user_id(user), encrypt(client.dump_session(), key))
+    return client
 
 
 def get_activity_repository(
@@ -435,6 +465,81 @@ def set_gemini_api_key(
     encrypted = encrypt(body.api_key, encryption_config.secret_encryption_key)
     user_repo.set_gemini_api_key(_require_user_id(user), encrypted)
     return Response(status_code=204)
+
+
+class ConnectGarminRequest(BaseModel):
+    email: str
+    password: str
+
+
+class GarminMfaCodeRequest(BaseModel):
+    pending_login_id: str
+    mfa_code: str
+
+
+class ConnectGarminResponse(BaseModel):
+    status: str
+    pending_login_id: str | None = None
+
+
+def _store_garmin_login(
+    user_id: int,
+    outcome: GarminLoginSuccess,
+    user_repo: UserRepository,
+    encryption_config: EncryptionConfig,
+) -> None:
+    key = encryption_config.secret_encryption_key
+    user_repo.set_garmin_credentials(user_id, outcome.email, encrypt(outcome.password, key))
+    user_repo.set_garmin_session(user_id, encrypt(outcome.session_tokens, key))
+
+
+@app.post("/users/me/garmin-credentials", response_model=ConnectGarminResponse)
+def connect_garmin_account(
+    body: ConnectGarminRequest,
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+    pending_logins: PendingGarminLoginStore = Depends(get_pending_garmin_login_store),
+) -> ConnectGarminResponse:
+    """Self-service Garmin onboarding, step 1 (issue #30, ADR-0006) —
+    `python-garminconnect` has no OAuth, so this is the user's real Garmin
+    email/password. Nothing is stored on a rejected login; a login that needs MFA
+    stores nothing yet either — it's completed by `complete_garmin_account_mfa`
+    below, which is the only path that reaches `_store_garmin_login` for that case."""
+    user_id = _require_user_id(user)
+    try:
+        outcome = initiate_garmin_login(body.email, body.password, pending_logins, user_id)
+    except GarminAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if isinstance(outcome, GarminMfaRequired):
+        return ConnectGarminResponse(
+            status="mfa_required", pending_login_id=outcome.pending_login_id
+        )
+
+    _store_garmin_login(user_id, outcome, user_repo, encryption_config)
+    return ConnectGarminResponse(status="connected")
+
+
+@app.post("/users/me/garmin-credentials/mfa", response_model=ConnectGarminResponse)
+def complete_garmin_account_mfa(
+    body: GarminMfaCodeRequest,
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+    pending_logins: PendingGarminLoginStore = Depends(get_pending_garmin_login_store),
+) -> ConnectGarminResponse:
+    """Self-service Garmin onboarding, step 2 (issue #30) — completes the login
+    `connect_garmin_account` started, resuming the same in-process pending login by
+    id (`PendingGarminLoginStore`)."""
+    user_id = _require_user_id(user)
+    try:
+        outcome = complete_garmin_mfa(body.pending_login_id, body.mfa_code, pending_logins, user_id)
+    except GarminAuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _store_garmin_login(user_id, outcome, user_repo, encryption_config)
+    return ConnectGarminResponse(status="connected")
 
 
 @app.post("/sync", response_model=SyncResponse)

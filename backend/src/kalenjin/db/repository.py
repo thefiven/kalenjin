@@ -332,6 +332,9 @@ def _to_user(user: User) -> UserRecord:
         email=user.email,
         created_at=user.created_at,
         gemini_api_key_encrypted=user.gemini_api_key_encrypted,
+        garmin_email=user.garmin_email,
+        garmin_password_encrypted=user.garmin_password_encrypted,
+        garmin_session_encrypted=user.garmin_session_encrypted,
     )
 
 
@@ -370,4 +373,20 @@ class SqlAlchemyUserRepository:
 
     def set_gemini_api_key(self, user_id: int, encrypted_key: str) -> None:
         stmt = update(User).where(User.id == user_id).values(gemini_api_key_encrypted=encrypted_key)
+        self._session.execute(stmt)
+
+    def set_garmin_credentials(self, user_id: int, email: str, encrypted_password: str) -> None:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(garmin_email=email, garmin_password_encrypted=encrypted_password)
+        )
+        self._session.execute(stmt)
+
+    def set_garmin_session(self, user_id: int, encrypted_session: str) -> None:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(garmin_session_encrypted=encrypted_session)
+        )
         self._session.execute(stmt)

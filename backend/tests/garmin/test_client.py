@@ -30,6 +30,14 @@ def test_constructs_the_underlying_client_with_credentials_and_mfa_prompt(
 
 
 @patch("kalenjin.garmin.client.Garmin")
+def test_dump_session_delegates_to_the_underlying_clients_dumps(garmin_cls: MagicMock) -> None:
+    garmin_cls.return_value.client.dumps.return_value = '{"di_token": "abc"}'
+    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+
+    assert client.dump_session() == '{"di_token": "abc"}'
+
+
+@patch("kalenjin.garmin.client.Garmin")
 def test_fetch_activities_delegates_to_get_activities_by_date_with_iso_dates(
     garmin_cls: MagicMock,
 ) -> None:

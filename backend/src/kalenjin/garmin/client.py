@@ -34,6 +34,12 @@ class GarminActivityClient:
     def login(self) -> None:
         self._client.login(self._tokenstore)
 
+    def dump_session(self) -> str:
+        """The session's current tokens, serialized (`garminconnect`'s own
+        `Client.dumps()`) — lets a caller persist a refreshed/resumed session for
+        reuse, without writing to a tokenstore file on disk."""
+        return cast(str, self._client.client.dumps())
+
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         return cast(
             list[dict[str, Any]],

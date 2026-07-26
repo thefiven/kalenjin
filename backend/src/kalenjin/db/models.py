@@ -117,6 +117,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     gemini_api_key_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
+    garmin_email: Mapped[str | None] = mapped_column(String, nullable=True)
+    garmin_password_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
+    garmin_session_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class InviteAllowlistEntry(Base):

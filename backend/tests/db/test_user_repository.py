@@ -94,3 +94,53 @@ def test_set_gemini_api_key_replaces_an_existing_key_on_rotation(db_session: Ses
     found = repo.find_by_id(created.id)
     assert found is not None
     assert found.gemini_api_key_encrypted == "ciphertext-new"
+
+
+def test_new_user_has_no_garmin_credentials_or_session(db_session: Session) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+
+    created = repo.create("google-subject-1", "friend@example.com")
+
+    assert created.garmin_email is None
+    assert created.garmin_password_encrypted is None
+    assert created.garmin_session_encrypted is None
+
+
+def test_set_garmin_credentials_then_find_by_id_returns_them(db_session: Session) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+
+    repo.set_garmin_credentials(created.id, "runner@example.com", "ciphertext-1")
+
+    found = repo.find_by_id(created.id)
+    assert found is not None
+    assert found.garmin_email == "runner@example.com"
+    assert found.garmin_password_encrypted == "ciphertext-1"
+
+
+def test_set_garmin_credentials_replaces_existing_ones_on_password_change(
+    db_session: Session,
+) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+    repo.set_garmin_credentials(created.id, "runner@example.com", "ciphertext-old")
+
+    repo.set_garmin_credentials(created.id, "runner@example.com", "ciphertext-new")
+
+    found = repo.find_by_id(created.id)
+    assert found is not None
+    assert found.garmin_password_encrypted == "ciphertext-new"
+
+
+def test_set_garmin_session_then_find_by_id_returns_it(db_session: Session) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+
+    repo.set_garmin_session(created.id, "session-ciphertext-1")
+
+    found = repo.find_by_id(created.id)
+    assert found is not None
+    assert found.garmin_session_encrypted == "session-ciphertext-1"

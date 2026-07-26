@@ -131,3 +131,61 @@ export async function setGeminiApiKey(apiKey: string): Promise<SetGeminiApiKeyRe
     body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
   return { success: false, error: detail ?? `Failed to save API key: ${res.status}` };
 }
+
+export type ConnectGarminResult =
+  | { success: true; status: "connected" }
+  | { success: true; status: "mfa_required"; pendingLoginId: string }
+  | { success: false; error: string };
+
+async function _errorFromResponse(res: Response, fallback: string): Promise<string> {
+  const body: unknown = await res.json().catch(() => null);
+  const detail =
+    body && typeof body === "object" && "detail" in body ? String(body.detail) : undefined;
+  return detail ?? fallback;
+}
+
+export async function connectGarminAccount(
+  email: string,
+  password: string,
+): Promise<ConnectGarminResult> {
+  const res = await fetch(`${API_URL}/users/me/garmin-credentials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ email, password }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return {
+      success: false,
+      error: await _errorFromResponse(res, `Failed to connect Garmin account: ${res.status}`),
+    };
+  }
+
+  const data = (await res.json()) as { status: string; pending_login_id: string | null };
+  if (data.status === "mfa_required") {
+    if (!data.pending_login_id) {
+      return { success: false, error: "Garmin login requires MFA but returned no pending login" };
+    }
+    return { success: true, status: "mfa_required", pendingLoginId: data.pending_login_id };
+  }
+  return { success: true, status: "connected" };
+}
+
+export async function submitGarminMfaCode(
+  pendingLoginId: string,
+  mfaCode: string,
+): Promise<ConnectGarminResult> {
+  const res = await fetch(`${API_URL}/users/me/garmin-credentials/mfa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ pending_login_id: pendingLoginId, mfa_code: mfaCode }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    return {
+      success: false,
+      error: await _errorFromResponse(res, `Failed to submit MFA code: ${res.status}`),
+    };
+  }
+  return { success: true, status: "connected" };
+}
