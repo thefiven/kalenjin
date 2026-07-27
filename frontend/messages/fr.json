@@ -5,7 +5,8 @@
     "plan": "Plan",
     "gemini": "Gemini",
     "garmin": "Garmin",
-    "signOut": "Se déconnecter"
+    "signOut": "Se déconnecter",
+    "toggleLocale": "Changer de langue"
   },
   "login": {
     "title": "Kalenjin",

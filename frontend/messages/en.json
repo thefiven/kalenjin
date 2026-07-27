@@ -5,7 +5,8 @@
     "plan": "Plan",
     "gemini": "Gemini",
     "garmin": "Garmin",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "toggleLocale": "Toggle language"
   },
   "login": {
     "title": "Kalenjin",

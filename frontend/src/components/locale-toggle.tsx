@@ -1,14 +1,15 @@
 "use client";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { setLocaleAction } from "@/app/actions";
-import type { Locale } from "@/lib/locale";
+import { resolveLocale, type Locale } from "@/lib/locale";
 import { Button } from "@/components/ui/button";
 
 export function LocaleToggle() {
-  const locale = useLocale() as Locale;
+  const locale = resolveLocale(useLocale());
+  const t = useTranslations("nav");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -24,7 +25,7 @@ export function LocaleToggle() {
     <Button
       variant="ghost"
       size="sm"
-      aria-label="Toggle language"
+      aria-label={t("toggleLocale")}
       onClick={toggleLocale}
       disabled={isPending}
     >
