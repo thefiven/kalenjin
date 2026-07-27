@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import date
 from typing import Any, cast
 
@@ -14,25 +13,28 @@ from kalenjin.plan.domain import SeanceRecord
 class GarminActivityClient:
     """Adapter over `python-garminconnect` implementing `sync.domain.ActivitySource`.
 
-    Uses `garminconnect`'s own tokenstore-based login: it loads a cached session
-    from `tokenstore` when present, and falls back to a fresh credential login,
-    persisting the new session there for next time. `garth` itself is not used
-    directly — it's deprecated and can no longer perform a fresh login since
-    Garmin changed its auth flow (see CONTEXT.md).
+    Resumes from `session` (a previously dumped, in-memory session — never a
+    filesystem path; `garmin.connection.GarminConnection` owns persisting and
+    decrypting it) when given, or does a credential login otherwise — though
+    `session=None` isn't unconditionally a fresh login: the vendor's own
+    `Garmin.login()` falls back to a `GARMINTOKENS` env var if set
+    (`tokenstore = tokenstore or os.getenv("GARMINTOKENS")`), a Kalenjin never sets
+    or documents. Deployments must not set `GARMINTOKENS`, or a "fresh" login could
+    silently resume whatever tokenstore that path points to instead. Has no MFA
+    capability of its own — that's exclusively `garmin/login.py`'s job, via the raw
+    vendor client with `return_on_mfa=True`; a session this class can't resume (e.g.
+    Garmin wants MFA again) surfaces as `GarminConnectAuthenticationError` from
+    `login()`, for the caller to map to `GarminConnection`'s `GarminReauthRequiredError`.
+    `garth` itself is not used directly — it's deprecated and can no longer perform a
+    fresh login since Garmin changed its auth flow (see CONTEXT.md).
     """
 
-    def __init__(
-        self,
-        email: str,
-        password: str,
-        tokenstore: str,
-        prompt_mfa: Callable[[], str] | None = None,
-    ) -> None:
-        self._tokenstore = tokenstore
-        self._client = Garmin(email=email, password=password, prompt_mfa=prompt_mfa)
+    def __init__(self, email: str, password: str, session: str | None = None) -> None:
+        self._session = session
+        self._client = Garmin(email=email, password=password)
 
     def login(self) -> None:
-        self._client.login(self._tokenstore)
+        self._client.login(self._session)
 
     def dump_session(self) -> str:
         """The session's current tokens, serialized (`garminconnect`'s own

@@ -126,7 +126,7 @@ class UserGarminConnection:
             ) from exc
 
         client = GarminActivityClient(
-            email=user.garmin_email, password=password, tokenstore=session_tokens or ""
+            email=user.garmin_email, password=password, session=session_tokens
         )
         try:
             client.login()

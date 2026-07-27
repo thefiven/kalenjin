@@ -137,7 +137,7 @@ def test_session_builds_a_client_from_the_users_decrypted_session_and_refreshes_
 
     assert session is client_cls.return_value
     client_cls.assert_called_once_with(
-        email="runner@example.com", password="hunter2", tokenstore='{"di_token": "abc"}'
+        email="runner@example.com", password="hunter2", session='{"di_token": "abc"}'
     )
     client_cls.return_value.login.assert_called_once_with()
     stored = user_repo.find_by_id(1)
