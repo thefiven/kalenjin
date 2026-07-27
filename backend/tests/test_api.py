@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from kalenjin.api import (
     _get_db_session,
+    _require_id,
     app,
     get_current_user,
     get_engine,
@@ -16,6 +17,7 @@ from kalenjin.api import (
     get_user_scope,
 )
 from kalenjin.auth.domain import UserRecord
+from kalenjin.plan.domain import ObjectifRecord
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
@@ -71,6 +73,26 @@ def test_get_engine_returns_a_distinct_engine_per_database_url() -> None:
     second = get_engine("postgresql+psycopg://cache-test-c")
 
     assert first is not second
+
+
+def _objectif_record(record_id: int | None) -> ObjectifRecord:
+    return ObjectifRecord(
+        id=record_id,
+        sport="running",
+        target_distance_meters=10_000,
+        target_date=date(2026, 1, 1),
+        target_time_seconds=None,
+        created_at=datetime.now(),
+    )
+
+
+def test_require_id_returns_the_id_when_present() -> None:
+    assert _require_id(_objectif_record(5)) == 5
+
+
+def test_require_id_raises_when_the_id_is_none() -> None:
+    with pytest.raises(AssertionError):
+        _require_id(_objectif_record(None))
 
 
 @pytest.mark.integration
