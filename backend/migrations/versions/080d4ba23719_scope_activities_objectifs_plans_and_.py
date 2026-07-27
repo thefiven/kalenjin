@@ -4,6 +4,13 @@ Revision ID: 080d4ba23719
 Revises: a6e289d12842
 Create Date: 2026-07-26 19:54:25.412577
 
+Adds `user_id` as NOT NULL with no backfill step — a deliberate "clean start"
+choice, not an oversight (issue #31, ADR-0011): no Kalenjin instance had any
+real activities/objectifs/plans/rapports at the time this was written, so
+there was no owner data to migrate onto the first `User` row. This migration
+will fail loudly against any database that already holds rows in these
+tables, by design — see ADR-0011 for what to do instead if that's ever the
+case (backfill `user_id` before adding the NOT NULL constraint).
 """
 
 from collections.abc import Sequence
