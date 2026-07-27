@@ -1,0 +1,21 @@
+{
+  "nav": {
+    "agenda": "Agenda",
+    "dashboard": "Dashboard",
+    "plan": "Plan",
+    "gemini": "Gemini",
+    "garmin": "Garmin",
+    "signOut": "Sign out",
+    "toggleLocale": "Toggle language"
+  },
+  "login": {
+    "title": "Kalenjin",
+    "signInWithGoogle": "Sign in with Google",
+    "errors": {
+      "invalidState": "Something went wrong starting the sign-in flow — please try again.",
+      "notInvited": "This Google account hasn't been invited to Kalenjin yet.",
+      "googleAuthFailed": "Google couldn't confirm your identity — please try again.",
+      "default": "Something went wrong signing in — please try again."
+    }
+  }
+}

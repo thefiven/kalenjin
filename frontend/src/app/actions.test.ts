@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockCookieStore = {
   get: vi.fn(),
   delete: vi.fn(),
+  set: vi.fn(),
 };
 vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore) }));
 
@@ -12,12 +13,13 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => redirectMock(pat
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-const { logoutAction } = await import("@/app/actions");
+const { logoutAction, setLocaleAction } = await import("@/app/actions");
 
 describe("logoutAction", () => {
   beforeEach(() => {
     mockCookieStore.get.mockReset();
     mockCookieStore.delete.mockReset();
+    mockCookieStore.set.mockReset();
     redirectMock.mockReset();
     fetchMock.mockReset().mockResolvedValue({ ok: true });
   });
@@ -51,5 +53,21 @@ describe("logoutAction", () => {
 
     expect(mockCookieStore.delete).toHaveBeenCalledWith("kalenjin_session");
     expect(redirectMock).toHaveBeenCalledWith("/login");
+  });
+});
+
+describe("setLocaleAction", () => {
+  beforeEach(() => {
+    mockCookieStore.set.mockReset();
+  });
+
+  it("sets the NEXT_LOCALE cookie to the given locale", async () => {
+    await setLocaleAction("en");
+
+    expect(mockCookieStore.set).toHaveBeenCalledWith(
+      "NEXT_LOCALE",
+      "en",
+      expect.objectContaining({ path: "/" }),
+    );
   });
 });
