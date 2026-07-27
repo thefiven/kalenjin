@@ -12,10 +12,23 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from kalenjin.api import _get_db_session, app, get_activity_source, get_current_user, get_llm_client
+from kalenjin.api import (
+    _get_db_session,
+    app,
+    get_current_user,
+    get_garmin_connection,
+    get_gemini_connection,
+)
 from kalenjin.auth.domain import UserRecord
 from support.api_client import overriding_dependencies
-from support.fakes import FakeLLMClient, FakeSource, RejectsPush, raw_activity
+from support.fakes import (
+    FakeGarminConnection,
+    FakeGeminiConnection,
+    FakeLLMClient,
+    FakeSource,
+    RejectsPush,
+    raw_activity,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -62,8 +75,10 @@ def test_activities_synced_for_one_user_are_invisible_to_another(
     with overriding_dependencies(
         {
             **_as_user(db_session, user_id),
-            get_activity_source: lambda: _SyncSource([raw_activity("1")]),
-            get_llm_client: lambda: FakeLLMClient(""),
+            get_garmin_connection: lambda: FakeGarminConnection(
+                session=_SyncSource([raw_activity("1")])
+            ),
+            get_gemini_connection: lambda: FakeGeminiConnection(client=FakeLLMClient("")),
         }
     ):
         sync_response = TestClient(app).post("/sync")
@@ -71,13 +86,19 @@ def test_activities_synced_for_one_user_are_invisible_to_another(
     assert sync_response.json() == {"imported_count": 1}
 
     with overriding_dependencies(
-        {**_as_user(db_session, user_id), get_activity_source: lambda: FakeSource({})}
+        {
+            **_as_user(db_session, user_id),
+            get_garmin_connection: lambda: FakeGarminConnection(session=FakeSource({})),
+        }
     ):
         mine = TestClient(app).get("/activities")
     assert [a["garmin_activity_id"] for a in mine.json()] == ["1"]
 
     with overriding_dependencies(
-        {**_as_user(db_session, other_user_id), get_activity_source: lambda: FakeSource({})}
+        {
+            **_as_user(db_session, other_user_id),
+            get_garmin_connection: lambda: FakeGarminConnection(session=FakeSource({})),
+        }
     ):
         client = TestClient(app)
         theirs = client.get("/activities")
@@ -93,9 +114,9 @@ def test_objectif_and_plan_are_isolated_per_user(
     with overriding_dependencies(
         {
             **_as_user(db_session, user_id),
-            get_activity_source: lambda: FakeSource({}),
-            get_llm_client: lambda: FakeLLMClient(
-                '[{"day_offset": 0, "type": "easy", "distance_meters": 5000}]'
+            get_garmin_connection: lambda: FakeGarminConnection(session=FakeSource({})),
+            get_gemini_connection: lambda: FakeGeminiConnection(
+                client=FakeLLMClient('[{"day_offset": 0, "type": "easy", "distance_meters": 5000}]')
             ),
         }
     ):
@@ -124,9 +145,9 @@ def test_updating_a_seance_is_isolated_per_user(
     with overriding_dependencies(
         {
             **_as_user(db_session, user_id),
-            get_activity_source: lambda: FakeSource({}),
-            get_llm_client: lambda: FakeLLMClient(
-                '[{"day_offset": 0, "type": "easy", "distance_meters": 5000}]'
+            get_garmin_connection: lambda: FakeGarminConnection(session=FakeSource({})),
+            get_gemini_connection: lambda: FakeGeminiConnection(
+                client=FakeLLMClient('[{"day_offset": 0, "type": "easy", "distance_meters": 5000}]')
             ),
         }
     ):
@@ -155,8 +176,12 @@ def test_rapport_generated_for_one_users_activity_is_invisible_to_another(
     with overriding_dependencies(
         {
             **_as_user(db_session, user_id),
-            get_activity_source: lambda: _SyncSource([raw_activity("1")]),
-            get_llm_client: lambda: FakeLLMClient(_rapport_llm_response()),
+            get_garmin_connection: lambda: FakeGarminConnection(
+                session=_SyncSource([raw_activity("1")])
+            ),
+            get_gemini_connection: lambda: FakeGeminiConnection(
+                client=FakeLLMClient(_rapport_llm_response())
+            ),
         }
     ):
         client = TestClient(app)
@@ -165,7 +190,10 @@ def test_rapport_generated_for_one_users_activity_is_invisible_to_another(
     assert rapport_response.status_code == 200
 
     with overriding_dependencies(
-        {**_as_user(db_session, other_user_id), get_activity_source: lambda: FakeSource({})}
+        {
+            **_as_user(db_session, other_user_id),
+            get_garmin_connection: lambda: FakeGarminConnection(session=FakeSource({})),
+        }
     ):
         theirs = TestClient(app).get("/activities/1/rapport")
 

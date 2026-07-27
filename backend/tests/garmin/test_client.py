@@ -5,34 +5,34 @@ from kalenjin.garmin.client import GarminActivityClient
 
 
 @patch("kalenjin.garmin.client.Garmin")
-def test_login_delegates_to_the_underlying_client_with_the_tokenstore(
-    garmin_cls: MagicMock,
-) -> None:
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+def test_login_resumes_from_the_given_session(garmin_cls: MagicMock) -> None:
+    client = GarminActivityClient(email="a@b.com", password="secret", session='{"di_token": "abc"}')
 
     client.login()
 
-    garmin_cls.return_value.login.assert_called_once_with("/tmp/tokens")
+    garmin_cls.return_value.login.assert_called_once_with('{"di_token": "abc"}')
 
 
 @patch("kalenjin.garmin.client.Garmin")
-def test_constructs_the_underlying_client_with_credentials_and_mfa_prompt(
-    garmin_cls: MagicMock,
-) -> None:
-    def prompt_mfa() -> str:
-        return "123456"
+def test_login_with_no_session_does_a_plain_credential_login(garmin_cls: MagicMock) -> None:
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
-    GarminActivityClient(
-        email="a@b.com", password="secret", tokenstore="/tmp/tokens", prompt_mfa=prompt_mfa
-    )
+    client.login()
 
-    garmin_cls.assert_called_once_with(email="a@b.com", password="secret", prompt_mfa=prompt_mfa)
+    garmin_cls.return_value.login.assert_called_once_with(None)
+
+
+@patch("kalenjin.garmin.client.Garmin")
+def test_constructs_the_underlying_client_with_credentials_only(garmin_cls: MagicMock) -> None:
+    GarminActivityClient(email="a@b.com", password="secret", session='{"di_token": "abc"}')
+
+    garmin_cls.assert_called_once_with(email="a@b.com", password="secret")
 
 
 @patch("kalenjin.garmin.client.Garmin")
 def test_dump_session_delegates_to_the_underlying_clients_dumps(garmin_cls: MagicMock) -> None:
     garmin_cls.return_value.client.dumps.return_value = '{"di_token": "abc"}'
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     assert client.dump_session() == '{"di_token": "abc"}'
 
@@ -42,7 +42,7 @@ def test_fetch_activities_delegates_to_get_activities_by_date_with_iso_dates(
     garmin_cls: MagicMock,
 ) -> None:
     garmin_cls.return_value.get_activities_by_date.return_value = [{"activityId": "1"}]
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     activities = client.fetch_activities(date(2024, 1, 1), date(2024, 1, 31))
 

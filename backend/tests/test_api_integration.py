@@ -5,16 +5,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from kalenjin.api import (
-    _get_db_session,
-    app,
-    get_activity_repository,
-    get_current_user,
-    get_llm_client,
-)
+from kalenjin.api import _get_db_session, app, get_current_user, get_gemini_connection
 from kalenjin.auth.domain import UserRecord
 from support.api_client import overriding_dependencies
-from support.fakes import FakeLLMClient, FakeRepository
+from support.fakes import FakeGeminiConnection, FakeLLMClient
 
 pytestmark = pytest.mark.integration
 
@@ -27,18 +21,18 @@ def _week_response() -> str:
     )
 
 
-def test_create_objectif_shares_one_real_session_across_its_two_repositories(
+def test_create_objectif_shares_one_real_session_across_its_repositories(
     db_session: Session, user_id: int
 ) -> None:
     """Only `_get_db_session` (and `get_current_user`, needed for a real `user_id` to
-    satisfy the FK — issue #28) is overridden here — `get_objectif_repository` and
-    `get_plan_repository` run as their real, session-backed implementations. This is
-    the exact same-request cross-repository write `ObjectifAndPlanRepositories` used
-    to force a shared session for: an Objectif is saved, then a Plan referencing its id
-    is saved immediately after, in the same not-yet-committed transaction. If FastAPI's
-    per-request dependency caching ever stopped sharing one session across sibling
-    `Depends(get_objectif_repository)`/`Depends(get_plan_repository)` calls, this would
-    fail with a foreign key violation instead of silently passing against fakes.
+    satisfy the FK — issue #28) is overridden here — `get_user_scope` runs as its real
+    implementation, building all four repositories from that one shared session. This
+    is the same-request cross-repository write `UserScope` must guarantee: an Objectif
+    is saved, then a Plan referencing its id is saved immediately after, in the same
+    not-yet-committed transaction. Since `UserScope` builds every repository from one
+    `Depends(_get_db_session)` resolution inside a single function, this invariant is
+    now structural rather than relying on FastAPI's per-request dependency cache to
+    share one session across several independent `Depends()` calls.
     """
 
     def _session_override() -> Iterator[Session]:
@@ -51,8 +45,9 @@ def test_create_objectif_shares_one_real_session_across_its_two_repositories(
     with overriding_dependencies(
         {
             _get_db_session: _session_override,
-            get_activity_repository: lambda: FakeRepository(),
-            get_llm_client: lambda: FakeLLMClient(_week_response()),
+            get_gemini_connection: lambda: FakeGeminiConnection(
+                client=FakeLLMClient(_week_response())
+            ),
             get_current_user: lambda: fake_user,
         }
     ):

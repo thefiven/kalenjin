@@ -2,17 +2,33 @@ from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 
+from kalenjin.api import UserScope
 from kalenjin.auth.domain import GoogleIdentity, UserRecord
 from kalenjin.auth.google_client import GoogleAuthError
-from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
-from kalenjin.rapport.domain import RapportRecord
-from kalenjin.sync.domain import ActivityRecord, DateRange
+from kalenjin.garmin.connection import (
+    Connected,
+    GarminConnectOutcome,
+    GarminNotConnectedError,
+)
+from kalenjin.garmin.domain import GarminSessionClient
+from kalenjin.llm.connection import GeminiNotConnectedError
+from kalenjin.llm.domain import LLMClient
+from kalenjin.plan.domain import (
+    ObjectifRecord,
+    ObjectifRepository,
+    PlanRecord,
+    PlanRepository,
+    SeanceRecord,
+)
+from kalenjin.rapport.domain import RapportRecord, RapportRepository
+from kalenjin.sync.domain import ActivityRecord, ActivityRepository, DateRange
 
 
 class RejectsPush:
     """Mixin for `ActivitySource`-only test fakes that still need to satisfy
-    `garmin.domain.GarminSessionClient`'s shape, since `get_garmin_push_client` asserts
-    on it — raises if push is ever actually exercised through one of these fakes."""
+    `garmin.domain.GarminSessionClient`'s shape, since `FakeGarminConnection.session()`
+    is typed to return one — raises if push is ever actually exercised through one of
+    these fakes."""
 
     def push_workout(self, seance: SeanceRecord, sport: str) -> str:
         raise NotImplementedError("push must not be exercised in tests using this fake")
@@ -172,12 +188,29 @@ class FakePlanRepository:
         return inserted
 
 
+def fake_user_scope(
+    activities: ActivityRepository | None = None,
+    objectifs: ObjectifRepository | None = None,
+    plans: PlanRepository | None = None,
+    rapports: RapportRepository | None = None,
+) -> UserScope:
+    """A `UserScope` built from fakes, defaulting each repository to an empty one so a
+    test only has to name the repos it actually cares about."""
+    return UserScope(
+        activities=activities or FakeRepository(),
+        objectifs=objectifs or FakeObjectifRepository(),
+        plans=plans or FakePlanRepository(),
+        rapports=rapports or FakeRapportRepository(),
+    )
+
+
 class FakeGarminPushClient:
     """In-memory `plan.domain.GarminPushClient` — no real Garmin Connect call.
 
     Also implements `sync.domain.ActivitySource` (returning no activities), since the
     real `GarminActivityClient` plays both roles behind a single login — tests that
-    exercise `/sync`'s Garmin push can override `get_activity_source` with this alone.
+    exercise `/sync`'s Garmin push can pass this alone as `FakeGarminConnection`'s
+    `session=`.
     """
 
     def __init__(self, fail_at_push_number: int | None = None) -> None:
@@ -204,6 +237,65 @@ class FakeGarminPushClient:
 
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         return []
+
+
+class FakeGarminConnection:
+    """In-memory `garmin.connection.GarminConnection` for HTTP-layer wiring tests —
+    the MFA state machine, decryption, and session refresh are tested directly
+    against the real implementation in tests/garmin/test_garmin_connection.py; this
+    fake just returns canned outcomes so route handlers can be tested in isolation."""
+
+    def __init__(
+        self,
+        session: GarminSessionClient | None = None,
+        connect_result: GarminConnectOutcome | Exception = Connected(),
+        complete_mfa_result: GarminConnectOutcome | Exception = Connected(),
+    ) -> None:
+        self._session = session
+        self._connect_result = connect_result
+        self._complete_mfa_result = complete_mfa_result
+        self.disconnected = False
+
+    def connect(self, email: str, password: str) -> GarminConnectOutcome:
+        if isinstance(self._connect_result, Exception):
+            raise self._connect_result
+        return self._connect_result
+
+    def complete_mfa(self, pending_login_id: str, mfa_code: str) -> GarminConnectOutcome:
+        if isinstance(self._complete_mfa_result, Exception):
+            raise self._complete_mfa_result
+        return self._complete_mfa_result
+
+    def session(self) -> GarminSessionClient:
+        if self._session is None:
+            raise GarminNotConnectedError("no Garmin session configured on this fake")
+        return self._session
+
+    def disconnect(self) -> None:
+        self.disconnected = True
+
+
+class FakeGeminiConnection:
+    """In-memory `llm.connection.GeminiConnection` for HTTP-layer wiring tests — key
+    validation/decryption is tested directly against the real implementation in
+    tests/llm/test_gemini_connection.py."""
+
+    def __init__(
+        self, client: LLMClient | None = None, set_key_error: Exception | None = None
+    ) -> None:
+        self._client = client
+        self._set_key_error = set_key_error
+        self.set_keys: list[str] = []
+
+    def set_key(self, api_key: str) -> None:
+        self.set_keys.append(api_key)
+        if self._set_key_error is not None:
+            raise self._set_key_error
+
+    def client(self) -> LLMClient:
+        if self._client is None:
+            raise GeminiNotConnectedError("no Gemini client configured on this fake")
+        return self._client
 
 
 class FakeGoogleIdentityVerifier:
