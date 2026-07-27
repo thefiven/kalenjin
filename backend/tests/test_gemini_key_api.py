@@ -1,20 +1,9 @@
 from fastapi.testclient import TestClient
 
-from kalenjin.api import (
-    app,
-    get_activity_repository,
-    get_gemini_connection,
-    get_objectif_repository,
-    get_plan_repository,
-)
+from kalenjin.api import app, get_gemini_connection, get_user_scope
 from kalenjin.llm.connection import GeminiInvalidKeyError
 from support.api_client import overriding_dependencies
-from support.fakes import (
-    FakeGeminiConnection,
-    FakeObjectifRepository,
-    FakePlanRepository,
-    FakeRepository,
-)
+from support.fakes import FakeGeminiConnection, fake_user_scope
 
 # Thin HTTP-wiring tests: does each route call the right `GeminiConnection` method and
 # map its outcome to the right response/status code? Key validation and decryption
@@ -45,9 +34,7 @@ def test_create_objectif_returns_a_clear_error_when_gemini_is_not_connected() ->
     with overriding_dependencies(
         {
             get_gemini_connection: lambda: FakeGeminiConnection(),
-            get_activity_repository: lambda: FakeRepository(),
-            get_objectif_repository: lambda: FakeObjectifRepository(),
-            get_plan_repository: lambda: FakePlanRepository(),
+            get_user_scope: lambda: fake_user_scope(),
         }
     ):
         response = TestClient(app).post(
