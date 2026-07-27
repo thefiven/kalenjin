@@ -1,13 +1,23 @@
 import { Button } from "@/components/ui/button";
 import { connectGarminErrorMessage } from "@/lib/connect-garmin-error";
-import { connectGarminAction, submitGarminMfaAction } from "./actions";
+import { connectGarminAction, disconnectGarminAction, submitGarminMfaAction } from "./actions";
 
 export default async function ConnectGarminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; success?: string; pending_login_id?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    success?: string;
+    disconnected?: string;
+    pending_login_id?: string;
+  }>;
 }) {
-  const { error, success, pending_login_id: pendingLoginId } = await searchParams;
+  const {
+    error,
+    success,
+    disconnected,
+    pending_login_id: pendingLoginId,
+  } = await searchParams;
   const message = connectGarminErrorMessage(error);
 
   return (
@@ -19,6 +29,11 @@ export default async function ConnectGarminPage({
       </p>
       {message && <p className="text-sm text-destructive">{message}</p>}
       {success && <p className="text-sm text-emerald-600">Garmin account connected.</p>}
+      {disconnected && (
+        <p className="text-sm text-emerald-600">
+          Garmin account disconnected — sync is paused until you reconnect.
+        </p>
+      )}
       {pendingLoginId ? (
         <form action={submitGarminMfaAction} className="flex w-full max-w-sm flex-col gap-2">
           <input type="hidden" name="pending_login_id" value={pendingLoginId} />
@@ -50,6 +65,11 @@ export default async function ConnectGarminPage({
           <Button type="submit">Connect</Button>
         </form>
       )}
+      <form action={disconnectGarminAction}>
+        <Button type="submit" variant="ghost" className="text-sm text-muted-foreground">
+          Disconnect Garmin account
+        </Button>
+      </form>
     </main>
   );
 }

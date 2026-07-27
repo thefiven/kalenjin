@@ -180,3 +180,28 @@ def test_an_existing_endpoint_rejects_a_request_with_no_session_cookie() -> None
     response = TestClient(app).get("/activities")
 
     assert response.status_code == 401
+
+
+def test_get_current_user_rejects_a_session_for_a_revoked_user() -> None:
+    """Issue #25 story 19: once the owner revokes a user's access, their
+    already-issued session cookie must stop working on the very next request — no
+    separate "is this session still valid" check exists beyond `find_by_id`.
+
+    Deliberately doesn't use `overriding_dependencies`: that helper defaults
+    `get_current_user` itself to a fake authenticated user, which would bypass the
+    very gate this test exercises."""
+    user_repo = FakeUserRepository(allowed_emails={"friend@x.com"})
+    created = user_repo.create("sub-1", "friend@x.com")
+    assert created.id is not None
+    user_repo.revoke_access("friend@x.com")
+
+    app.dependency_overrides[get_user_repository] = lambda: user_repo
+    app.dependency_overrides[get_session_codec] = lambda: SESSION_CODEC
+    try:
+        client = TestClient(app)
+        client.cookies.set(SESSION_COOKIE_NAME, SESSION_CODEC.create(created.id))
+        response = client.get("/auth/me")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401

@@ -9,7 +9,7 @@ describe("ConnectGarminPage", () => {
 
     expect(screen.getByPlaceholderText(/garmin email/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/garmin password/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     expect(screen.queryByText(/connected/i)).not.toBeInTheDocument();
   });
 
@@ -38,5 +38,28 @@ describe("ConnectGarminPage", () => {
     render(ui);
 
     expect(screen.getByText(/garmin account connected/i)).toBeInTheDocument();
+  });
+
+  it("always renders a disconnect button, regardless of connection state", async () => {
+    const ui = await ConnectGarminPage({ searchParams: Promise.resolve({}) });
+    render(ui);
+
+    expect(screen.getByRole("button", { name: /disconnect garmin account/i })).toBeInTheDocument();
+  });
+
+  it("renders a success message after disconnecting", async () => {
+    const ui = await ConnectGarminPage({ searchParams: Promise.resolve({ disconnected: "1" }) });
+    render(ui);
+
+    expect(screen.getByText(/garmin account disconnected/i)).toBeInTheDocument();
+  });
+
+  it("renders the mapped message when redirected back with a disconnect-failed error", async () => {
+    const ui = await ConnectGarminPage({
+      searchParams: Promise.resolve({ error: "disconnect_failed" }),
+    });
+    render(ui);
+
+    expect(screen.getByText(/couldn't disconnect/i)).toBeInTheDocument();
   });
 });

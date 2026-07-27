@@ -52,6 +52,7 @@ class UserRecord:
     garmin_email: str | None = None
     garmin_password_encrypted: str | None = None
     garmin_session_encrypted: str | None = None
+    is_active: bool = True
 
 
 class UserRepository(Protocol):
@@ -68,9 +69,21 @@ class UserRepository(Protocol):
         allowlisted email is a no-op."""
         ...
 
+    def revoke_access(self, email: str) -> None:
+        """Cuts off `email`'s access (issue #25 story 19): removes it from the invite
+        allowlist, so no future Google login for it can create or resume a `User`, and
+        deactivates any existing `User` row for it, so `find_by_id` stops returning it —
+        the next request on an already-issued session cookie hits `get_current_user`'s
+        401 path. Idempotent; safe to call whether or not a `User` row exists yet."""
+        ...
+
     def find_by_google_subject(self, subject: str) -> UserRecord | None: ...
 
-    def find_by_id(self, user_id: int) -> UserRecord | None: ...
+    def find_by_id(self, user_id: int) -> UserRecord | None:
+        """`None` both when no such row exists and when the matching row has been
+        deactivated by `revoke_access` — callers (`get_current_user`) treat both the
+        same way, as "not a usable session"."""
+        ...
 
     def create(self, subject: str, email: str) -> UserRecord:
         """Creates a new `User` row. Callers must have already checked
@@ -93,4 +106,11 @@ class UserRepository(Protocol):
         """Stores (or replaces) the user's resumable Garmin session tokens (issue
         #30), produced by a successful login or MFA completion. Callers encrypt
         before calling — this repository only persists ciphertext."""
+        ...
+
+    def clear_garmin_credentials(self, user_id: int) -> None:
+        """Disconnects the user's Garmin account (issue #25 story 18): clears the
+        stored email, encrypted password, and encrypted session, so sync stops (the
+        next attempt hits the same "connect your Garmin account first" path as a user
+        who never connected one). Idempotent."""
         ...

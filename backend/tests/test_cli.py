@@ -151,3 +151,25 @@ def test_invite_main_requires_exactly_one_email_argument() -> None:
 
     with pytest.raises(SystemExit):
         cli.invite_main(["a@b.com", "extra-arg"])
+
+
+def test_revoke_main_revokes_access_for_the_email(
+    invite_cli_mocks: _InviteCliMocks, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://x")
+
+    cli.revoke_main(["friend@example.com"])
+
+    invite_cli_mocks.make_engine.assert_called_once_with("postgresql://x")
+    invite_cli_mocks.repository_cls.assert_called_once_with(invite_cli_mocks.fake_session)
+    invite_cli_mocks.repository_cls.return_value.revoke_access.assert_called_once_with(
+        "friend@example.com"
+    )
+
+
+def test_revoke_main_requires_exactly_one_email_argument() -> None:
+    with pytest.raises(SystemExit):
+        cli.revoke_main([])
+
+    with pytest.raises(SystemExit):
+        cli.revoke_main(["a@b.com", "extra-arg"])

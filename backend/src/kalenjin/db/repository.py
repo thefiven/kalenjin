@@ -335,6 +335,7 @@ def _to_user(user: User) -> UserRecord:
         garmin_email=user.garmin_email,
         garmin_password_encrypted=user.garmin_password_encrypted,
         garmin_session_encrypted=user.garmin_session_encrypted,
+        is_active=user.is_active,
     )
 
 
@@ -356,6 +357,12 @@ class SqlAlchemyUserRepository:
         )
         self._session.execute(stmt)
 
+    def revoke_access(self, email: str) -> None:
+        self._session.execute(
+            delete(InviteAllowlistEntry).where(InviteAllowlistEntry.email == email)
+        )
+        self._session.execute(update(User).where(User.email == email).values(is_active=False))
+
     def find_by_google_subject(self, subject: str) -> UserRecord | None:
         stmt = select(User).where(User.google_subject == subject)
         user = self._session.execute(stmt).scalar_one_or_none()
@@ -363,7 +370,9 @@ class SqlAlchemyUserRepository:
 
     def find_by_id(self, user_id: int) -> UserRecord | None:
         user = self._session.get(User, user_id)
-        return None if user is None else _to_user(user)
+        if user is None or not user.is_active:
+            return None
+        return _to_user(user)
 
     def create(self, subject: str, email: str) -> UserRecord:
         row = User(google_subject=subject, email=email, created_at=datetime.now())
@@ -388,5 +397,15 @@ class SqlAlchemyUserRepository:
             update(User)
             .where(User.id == user_id)
             .values(garmin_session_encrypted=encrypted_session)
+        )
+        self._session.execute(stmt)
+
+    def clear_garmin_credentials(self, user_id: int) -> None:
+        stmt = (
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                garmin_email=None, garmin_password_encrypted=None, garmin_session_encrypted=None
+            )
         )
         self._session.execute(stmt)

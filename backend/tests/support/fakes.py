@@ -241,11 +241,17 @@ class FakeUserRepository:
     def add_to_allowlist(self, email: str) -> None:
         self._allowed_emails.add(email)
 
+    def revoke_access(self, email: str) -> None:
+        self._allowed_emails.discard(email)
+        for i, u in enumerate(self._users):
+            if u.email == email:
+                self._users[i] = replace(u, is_active=False)
+
     def find_by_google_subject(self, subject: str) -> UserRecord | None:
         return next((u for u in self._users if u.google_subject == subject), None)
 
     def find_by_id(self, user_id: int) -> UserRecord | None:
-        return next((u for u in self._users if u.id == user_id), None)
+        return next((u for u in self._users if u.id == user_id and u.is_active), None)
 
     def create(self, subject: str, email: str) -> UserRecord:
         user = UserRecord(
@@ -268,6 +274,15 @@ class FakeUserRepository:
     def set_garmin_session(self, user_id: int, encrypted_session: str) -> None:
         idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
         self._users[idx] = replace(self._users[idx], garmin_session_encrypted=encrypted_session)
+
+    def clear_garmin_credentials(self, user_id: int) -> None:
+        idx = next(i for i, u in enumerate(self._users) if u.id == user_id)
+        self._users[idx] = replace(
+            self._users[idx],
+            garmin_email=None,
+            garmin_password_encrypted=None,
+            garmin_session_encrypted=None,
+        )
 
 
 def raw_activity(activity_id: str, started_at: str = "2024-06-01 07:30:00") -> dict[str, Any]:
