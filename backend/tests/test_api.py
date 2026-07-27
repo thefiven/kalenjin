@@ -10,10 +10,9 @@ from kalenjin.api import (
     _get_db_session,
     app,
     get_activity_repository,
-    get_activity_source,
     get_current_user,
-    get_garmin_push_client,
-    get_llm_client,
+    get_garmin_connection,
+    get_gemini_connection,
     get_objectif_repository,
     get_plan_repository,
     get_rapport_repository,
@@ -23,12 +22,13 @@ from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
 from support.fakes import (
+    FakeGarminConnection,
+    FakeGeminiConnection,
     FakeLLMClient,
     FakeObjectifRepository,
     FakePlanRepository,
     FakeRapportRepository,
     FakeRepository,
-    FakeSource,
     RejectsPush,
     raw_activity,
 )
@@ -46,14 +46,6 @@ class _AnyRangeSource(RejectsPush):
 
     def fetch_activities(self, start_date: date, end_date: date) -> list[dict[str, Any]]:
         return self._raw_activities
-
-
-def test_get_garmin_push_client_rejects_a_narrow_activity_only_source() -> None:
-    """`get_activity_source` overridden with something only `ActivitySource`-shaped
-    (no push_workout/delete_workout) must fail loudly right here, not with a
-    confusing AttributeError buried inside a later Garmin push call."""
-    with pytest.raises(AssertionError):
-        get_garmin_push_client(source=FakeSource({}))
 
 
 def test_health_check() -> None:
@@ -101,11 +93,11 @@ def test_sync_endpoint_reports_the_number_of_imported_activities() -> None:
 
     with overriding_dependencies(
         {
-            get_activity_source: lambda: source,
+            get_garmin_connection: lambda: FakeGarminConnection(session=source),
             get_activity_repository: lambda: repo,
             get_objectif_repository: lambda: FakeObjectifRepository(),
             get_plan_repository: lambda: FakePlanRepository(),
-            get_llm_client: lambda: FakeLLMClient(""),
+            get_gemini_connection: lambda: FakeGeminiConnection(client=FakeLLMClient("")),
         }
     ):
         response = TestClient(app).post("/sync")
@@ -190,8 +182,8 @@ def test_generate_rapport_creates_and_persists_a_rapport() -> None:
             get_rapport_repository: lambda: rapport_repo,
             get_objectif_repository: lambda: FakeObjectifRepository(),
             get_plan_repository: lambda: FakePlanRepository(),
-            get_activity_source: lambda: _AnyRangeSource([]),
-            get_llm_client: lambda: llm,
+            get_garmin_connection: lambda: FakeGarminConnection(session=_AnyRangeSource([])),
+            get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
     ):
         response = TestClient(app).post("/activities/1/rapport")
@@ -215,8 +207,8 @@ def test_generate_rapport_returns_404_when_activity_is_missing() -> None:
             get_rapport_repository: lambda: rapport_repo,
             get_objectif_repository: lambda: FakeObjectifRepository(),
             get_plan_repository: lambda: FakePlanRepository(),
-            get_activity_source: lambda: _AnyRangeSource([]),
-            get_llm_client: lambda: llm,
+            get_garmin_connection: lambda: FakeGarminConnection(session=_AnyRangeSource([])),
+            get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
     ):
         response = TestClient(app).post("/activities/does-not-exist/rapport")

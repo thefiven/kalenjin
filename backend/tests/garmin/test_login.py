@@ -134,6 +134,33 @@ def test_a_transport_failure_raises_a_garmin_auth_error(garmin_cls: MagicMock) -
 
 
 @patch("kalenjin.garmin.login.Garmin")
+def test_purge_for_user_removes_only_that_users_pending_logins(garmin_cls: MagicMock) -> None:
+    garmin_cls.return_value.login.return_value = ("needs_mfa", None)
+    store = PendingGarminLoginStore()
+    mine = initiate_garmin_login("a@b.com", "secret", store, user_id=1)
+    theirs = initiate_garmin_login("c@d.com", "secret", store, user_id=2)
+    assert isinstance(mine, GarminMfaRequired)
+    assert isinstance(theirs, GarminMfaRequired)
+
+    store.purge_for_user(1)
+
+    assert store.pop(mine.pending_login_id, user_id=1) is None
+    # A different user's pending login survives user 1's purge.
+    garmin_cls.return_value.resume_login.return_value = None
+    garmin_cls.return_value.client.dumps.return_value = "{}"
+    assert complete_garmin_mfa(theirs.pending_login_id, "123456", store, user_id=2) is not None
+
+
+@patch("kalenjin.garmin.login.Garmin")
+def test_purge_for_user_is_a_no_op_when_the_user_has_no_pending_logins(
+    garmin_cls: MagicMock,
+) -> None:
+    store = PendingGarminLoginStore()
+
+    store.purge_for_user(1)  # must not raise
+
+
+@patch("kalenjin.garmin.login.Garmin")
 def test_an_expired_pending_login_cannot_be_resumed(garmin_cls: MagicMock) -> None:
     garmin_cls.return_value.login.return_value = ("needs_mfa", None)
     store = PendingGarminLoginStore(ttl_seconds=0.01)

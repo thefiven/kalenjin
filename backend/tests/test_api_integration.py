@@ -10,11 +10,11 @@ from kalenjin.api import (
     app,
     get_activity_repository,
     get_current_user,
-    get_llm_client,
+    get_gemini_connection,
 )
 from kalenjin.auth.domain import UserRecord
 from support.api_client import overriding_dependencies
-from support.fakes import FakeLLMClient, FakeRepository
+from support.fakes import FakeGeminiConnection, FakeLLMClient, FakeRepository
 
 pytestmark = pytest.mark.integration
 
@@ -52,7 +52,9 @@ def test_create_objectif_shares_one_real_session_across_its_two_repositories(
         {
             _get_db_session: _session_override,
             get_activity_repository: lambda: FakeRepository(),
-            get_llm_client: lambda: FakeLLMClient(_week_response()),
+            get_gemini_connection: lambda: FakeGeminiConnection(
+                client=FakeLLMClient(_week_response())
+            ),
             get_current_user: lambda: fake_user,
         }
     ):
