@@ -8,8 +8,7 @@ from functools import lru_cache
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
-from garminconnect.exceptions import GarminConnectAuthenticationError
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -25,20 +24,23 @@ from kalenjin.db.repository import (
     SqlAlchemyUserRepository,
 )
 from kalenjin.db.session import make_engine, make_session_factory, session_scope
-from kalenjin.garmin.client import GarminActivityClient
-from kalenjin.garmin.domain import GarminSessionClient
-from kalenjin.garmin.login import (
-    GarminAuthError,
-    GarminLoginSuccess,
-    GarminMfaRequired,
-    PendingGarminLoginStore,
-    complete_garmin_mfa,
-    initiate_garmin_login,
+from kalenjin.garmin.connection import (
+    Connected,
+    GarminConnection,
+    GarminNotConnectedError,
+    GarminReauthRequiredError,
+    MfaRequired,
+    UserGarminConnection,
 )
-from kalenjin.llm.domain import LLMClient
-from kalenjin.llm.gemini_client import GeminiLLMClient, validate_gemini_api_key
+from kalenjin.garmin.login import GarminAuthError, PendingGarminLoginStore
+from kalenjin.llm.connection import (
+    GeminiConnection,
+    GeminiInvalidKeyError,
+    GeminiNotConnectedError,
+    GeminiReauthRequiredError,
+    UserGeminiConnection,
+)
 from kalenjin.plan.domain import (
-    GarminPushClient,
     ObjectifRecord,
     ObjectifRepository,
     PlanRecord,
@@ -48,8 +50,7 @@ from kalenjin.plan.domain import (
 from kalenjin.plan.generation import estimate_current_weekly_volume, generate_plan_seances
 from kalenjin.rapport.domain import RapportRecord, RapportRepository
 from kalenjin.rapport.orchestrator import RapportOrchestrator
-from kalenjin.security.encryption import decrypt, encrypt
-from kalenjin.sync.domain import ActivityRecord, ActivityRepository, ActivitySource, DateRange
+from kalenjin.sync.domain import ActivityRecord, ActivityRepository, DateRange
 from kalenjin.sync.orchestrator import SyncOrchestrator
 
 RECENT_RAPPORTS_FOR_ADJUSTMENT = 5
@@ -137,43 +138,43 @@ def _require_user_id(user: UserRecord) -> int:
     return user.id
 
 
-def get_activity_source(
+def get_garmin_connection(
     user: UserRecord = Depends(get_current_user),
     user_repo: UserRepository = Depends(get_user_repository),
     encryption_config: EncryptionConfig = Depends(get_encryption_config),
-) -> GarminSessionClient:
-    """Each user's own Garmin session (issue #30, ADR-0006), never the old shared
-    `GarminConfig`/`GARMIN_EMAIL`/`GARMIN_PASSWORD` — those are retired for
-    authenticated requests. Prefers the user's stored session tokens (no repeat
-    login, no risk of a fresh MFA prompt); a missing/rejected session falls back to
-    a password login, persisting whatever session comes out of it so the next call
-    can resume from there again."""
-    if user.garmin_email is None or user.garmin_password_encrypted is None:
-        raise HTTPException(status_code=400, detail="Connect your Garmin account first")
-
-    key = encryption_config.secret_encryption_key
-    password = decrypt(user.garmin_password_encrypted, key)
-    session_tokens = (
-        decrypt(user.garmin_session_encrypted, key) if user.garmin_session_encrypted else None
+    pending_logins: PendingGarminLoginStore = Depends(get_pending_garmin_login_store),
+) -> GarminConnection:
+    return UserGarminConnection(
+        _require_user_id(user),
+        user_repo,
+        encryption_config.secret_encryption_key,
+        pending_logins,
     )
 
-    client = GarminActivityClient(
-        email=user.garmin_email, password=password, tokenstore=session_tokens or ""
-    )
-    try:
-        client.login()
-    except GarminConnectAuthenticationError as exc:
-        # Could be an expired/rejected session, a changed Garmin password, or (since no
-        # prompt_mfa/return_on_mfa is passed here) a fresh MFA challenge — garminconnect
-        # doesn't distinguish these outcomes, so the message stays generic rather than
-        # guessing which one it was.
-        raise HTTPException(
-            status_code=400,
-            detail="Your Garmin session needs to be reconnected — connect your account again",
-        ) from exc
 
-    user_repo.set_garmin_session(_require_user_id(user), encrypt(client.dump_session(), key))
-    return client
+def get_gemini_connection(
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+) -> GeminiConnection:
+    return UserGeminiConnection(
+        _require_user_id(user), user_repo, encryption_config.secret_encryption_key
+    )
+
+
+def _client_error(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+for _exc_type in (
+    GarminNotConnectedError,
+    GarminReauthRequiredError,
+    GarminAuthError,
+    GeminiNotConnectedError,
+    GeminiReauthRequiredError,
+    GeminiInvalidKeyError,
+):
+    app.add_exception_handler(_exc_type, _client_error)
 
 
 def get_activity_repository(
@@ -202,40 +203,6 @@ def get_plan_repository(
     user: UserRecord = Depends(get_current_user),
 ) -> PlanRepository:
     return SqlAlchemyPlanRepository(session, _require_user_id(user))
-
-
-def get_garmin_push_client(
-    source: GarminSessionClient = Depends(get_activity_source),
-) -> GarminPushClient:
-    """The same logged-in `GarminActivityClient` as `get_activity_source`.
-
-    Depending on `get_activity_source` (rather than constructing a second client) lets
-    FastAPI's per-request dependency caching reuse the one already-authenticated
-    session instead of logging in twice — see issue #5's "reuse the auth from #1".
-    `GarminSessionClient` already includes `GarminPushClient`'s methods, so no cast
-    is needed — the `isinstance` check below only exists because a test overriding
-    `get_activity_source` with a narrower fake (only `ActivitySource`-shaped) isn't
-    caught by mypy, since this repo's CI doesn't type-check `tests/`; it turns that
-    mistake into a clear assertion right at this seam instead of a confusing
-    `AttributeError` buried inside a later `push_workout`/`delete_workout` call.
-    """
-    assert isinstance(source, GarminSessionClient), (
-        f"{source!r} doesn't implement push_workout/delete_workout — "
-        "get_activity_source must be overridden with something GarminSessionClient-shaped."
-    )
-    return source
-
-
-def get_llm_client(
-    user: UserRecord = Depends(get_current_user),
-    encryption_config: EncryptionConfig = Depends(get_encryption_config),
-) -> LLMClient:
-    """Each user's own Gemini key (issue #29), never the old shared global one —
-    `LlmConfig`/`GEMINI_API_KEY` are retired for authenticated requests."""
-    if user.gemini_api_key_encrypted is None:
-        raise HTTPException(status_code=400, detail="Connect your Gemini API key first")
-    api_key = decrypt(user.gemini_api_key_encrypted, encryption_config.secret_encryption_key)
-    return GeminiLLMClient(api_key=api_key)
 
 
 def _to_response(activity: ActivityRecord) -> ActivityResponse:
@@ -456,19 +423,13 @@ class SetGeminiApiKeyRequest(BaseModel):
 
 @app.post("/users/me/gemini-key", status_code=204)
 def set_gemini_api_key(
-    body: SetGeminiApiKeyRequest,
-    user: UserRecord = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
-    encryption_config: EncryptionConfig = Depends(get_encryption_config),
+    body: SetGeminiApiKeyRequest, gemini: GeminiConnection = Depends(get_gemini_connection)
 ) -> Response:
     """Self-service Gemini key onboarding (issue #29) — validated with a real call
     before being stored encrypted, so a typo is caught immediately rather than at the
-    next rapport generation. Resubmitting replaces the previous key (rotation)."""
-    if not validate_gemini_api_key(body.api_key):
-        raise HTTPException(status_code=400, detail="Invalid Gemini API key")
-
-    encrypted = encrypt(body.api_key, encryption_config.secret_encryption_key)
-    user_repo.set_gemini_api_key(_require_user_id(user), encrypted)
+    next rapport generation (`GeminiInvalidKeyError`, mapped to a 400 by the handler
+    registered above). Resubmitting replaces the previous key (rotation)."""
+    gemini.set_key(body.api_key)
     return Response(status_code=204)
 
 
@@ -487,88 +448,60 @@ class ConnectGarminResponse(BaseModel):
     pending_login_id: str | None = None
 
 
-def _store_garmin_login(
-    user_id: int,
-    outcome: GarminLoginSuccess,
-    user_repo: UserRepository,
-    encryption_config: EncryptionConfig,
-) -> None:
-    key = encryption_config.secret_encryption_key
-    user_repo.set_garmin_credentials(user_id, outcome.email, encrypt(outcome.password, key))
-    user_repo.set_garmin_session(user_id, encrypt(outcome.session_tokens, key))
-
-
 @app.post("/users/me/garmin-credentials", response_model=ConnectGarminResponse)
 def connect_garmin_account(
     body: ConnectGarminRequest,
-    user: UserRecord = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
-    encryption_config: EncryptionConfig = Depends(get_encryption_config),
-    pending_logins: PendingGarminLoginStore = Depends(get_pending_garmin_login_store),
+    garmin: GarminConnection = Depends(get_garmin_connection),
 ) -> ConnectGarminResponse:
     """Self-service Garmin onboarding, step 1 (issue #30, ADR-0006) —
     `python-garminconnect` has no OAuth, so this is the user's real Garmin
-    email/password. Nothing is stored on a rejected login; a login that needs MFA
-    stores nothing yet either — it's completed by `complete_garmin_account_mfa`
-    below, which is the only path that reaches `_store_garmin_login` for that case."""
-    user_id = _require_user_id(user)
-    try:
-        outcome = initiate_garmin_login(body.email, body.password, pending_logins, user_id)
-    except GarminAuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    if isinstance(outcome, GarminMfaRequired):
+    email/password. Nothing is stored on a rejected login (`GarminAuthError`, mapped
+    to a 400 by the handler registered above); a login that needs MFA stores nothing
+    yet either — `GarminConnection.complete_mfa` is what finishes that case."""
+    outcome = garmin.connect(body.email, body.password)
+    if isinstance(outcome, MfaRequired):
         return ConnectGarminResponse(
             status="mfa_required", pending_login_id=outcome.pending_login_id
         )
-
-    _store_garmin_login(user_id, outcome, user_repo, encryption_config)
+    assert isinstance(outcome, Connected)
     return ConnectGarminResponse(status="connected")
 
 
 @app.post("/users/me/garmin-credentials/mfa", response_model=ConnectGarminResponse)
 def complete_garmin_account_mfa(
     body: GarminMfaCodeRequest,
-    user: UserRecord = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
-    encryption_config: EncryptionConfig = Depends(get_encryption_config),
-    pending_logins: PendingGarminLoginStore = Depends(get_pending_garmin_login_store),
+    garmin: GarminConnection = Depends(get_garmin_connection),
 ) -> ConnectGarminResponse:
     """Self-service Garmin onboarding, step 2 (issue #30) — completes the login
     `connect_garmin_account` started, resuming the same in-process pending login by
-    id (`PendingGarminLoginStore`)."""
-    user_id = _require_user_id(user)
-    try:
-        outcome = complete_garmin_mfa(body.pending_login_id, body.mfa_code, pending_logins, user_id)
-    except GarminAuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    _store_garmin_login(user_id, outcome, user_repo, encryption_config)
+    id (`PendingGarminLoginStore`, owned internally by `GarminConnection`)."""
+    garmin.complete_mfa(body.pending_login_id, body.mfa_code)
     return ConnectGarminResponse(status="connected")
 
 
 @app.delete("/users/me/garmin-credentials", status_code=204)
 def disconnect_garmin_account(
-    user: UserRecord = Depends(get_current_user),
-    user_repo: UserRepository = Depends(get_user_repository),
+    garmin: GarminConnection = Depends(get_garmin_connection),
 ) -> Response:
     """Disconnects the user's Garmin account (issue #25 story 18) — sync stops until
     they reconnect. Idempotent: disconnecting an already-disconnected account is a
     204, not an error."""
-    user_repo.clear_garmin_credentials(_require_user_id(user))
+    garmin.disconnect()
     return Response(status_code=204)
 
 
 @app.post("/sync", response_model=SyncResponse)
 def trigger_sync(
-    source: ActivitySource = Depends(get_activity_source),
     repo: ActivityRepository = Depends(get_activity_repository),
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
-    garmin: GarminPushClient = Depends(get_garmin_push_client),
-    llm: LLMClient = Depends(get_llm_client),
+    garmin: GarminConnection = Depends(get_garmin_connection),
+    gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> SyncResponse:
-    orchestrator = SyncOrchestrator(source, repo, objectif_repo, plan_repo, garmin, llm)
+    session = garmin.session()
+    orchestrator = SyncOrchestrator(
+        session, repo, objectif_repo, plan_repo, session, gemini.client()
+    )
     result = orchestrator.run(today=date.today())
     return SyncResponse(imported_count=result.imported_count)
 
@@ -601,11 +534,18 @@ def generate_activity_rapport(
     rapport_repo: RapportRepository = Depends(get_rapport_repository),
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
-    garmin: GarminPushClient = Depends(get_garmin_push_client),
-    llm: LLMClient = Depends(get_llm_client),
+    garmin: GarminConnection = Depends(get_garmin_connection),
+    gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> RapportResponse:
+    session = garmin.session()
     orchestrator = RapportOrchestrator(
-        repo, rapport_repo, objectif_repo, plan_repo, garmin, llm, RECENT_RAPPORTS_FOR_ADJUSTMENT
+        repo,
+        rapport_repo,
+        objectif_repo,
+        plan_repo,
+        session,
+        gemini.client(),
+        RECENT_RAPPORTS_FOR_ADJUSTMENT,
     )
     rapport = orchestrator.generate_for_activity(garmin_activity_id, today=date.today())
     if rapport is None:
@@ -630,7 +570,7 @@ def create_objectif(
     activity_repo: ActivityRepository = Depends(get_activity_repository),
     objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
     plan_repo: PlanRepository = Depends(get_plan_repository),
-    llm: LLMClient = Depends(get_llm_client),
+    gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
     today = date.today()
@@ -650,7 +590,10 @@ def create_objectif(
         activity_repo.list_activities(), today=today
     )
     seances = generate_plan_seances(
-        objectif, llm=llm, today=today, current_weekly_volume_meters=current_weekly_volume
+        objectif,
+        llm=gemini.client(),
+        today=today,
+        current_weekly_volume_meters=current_weekly_volume,
     )
     plan = plan_repo.save(
         PlanRecord(id=None, objectif_id=objectif.id, created_at=datetime.now(), seances=seances)

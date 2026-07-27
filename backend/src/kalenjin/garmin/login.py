@@ -91,6 +91,14 @@ class PendingGarminLoginStore:
             return None
         return pending
 
+    def purge_for_user(self, user_id: int) -> None:
+        """Discards every pending login belonging to `user_id` — called on disconnect
+        (issue #25 story 18) so a stale in-flight MFA attempt (and the plaintext
+        password it's holding in memory) doesn't outlive the account it belongs to."""
+        stale = [key for key, pending in self._pending.items() if pending.user_id == user_id]
+        for key in stale:
+            del self._pending[key]
+
     def _evict_expired(self) -> None:
         now = time.monotonic()
         expired = [key for key, pending in self._pending.items() if pending.expires_at <= now]
