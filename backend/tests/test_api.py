@@ -1,19 +1,24 @@
+from collections.abc import Iterator
 from datetime import date, datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from kalenjin.api import (
+    _get_db_session,
     app,
     get_activity_repository,
     get_activity_source,
+    get_current_user,
     get_garmin_push_client,
     get_llm_client,
     get_objectif_repository,
     get_plan_repository,
     get_rapport_repository,
 )
+from kalenjin.auth.domain import UserRecord
 from kalenjin.rapport.domain import RapportRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
@@ -58,6 +63,36 @@ def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.integration
+def test_a_freshly_signed_up_user_sees_a_clean_empty_state_everywhere(
+    db_session: Session, user_id: int
+) -> None:
+    """Issue #31, acceptance criterion 1: since no pre-existing owner data was ever
+    migrated (ADR-0011 — none existed to migrate), the owner's first post-launch login
+    must land on a clean empty state, exactly like any other brand-new user.
+
+    Exercises the real, session-backed per-user repositories (only
+    `_get_db_session`/`get_current_user` are faked) rather than empty-by-construction
+    fakes — see `test_multi_tenant_isolation.py`'s module docstring for why that
+    distinction matters: a fake that's empty for everyone proves nothing about this
+    specific user's real, `user_id`-scoped rows being empty."""
+
+    def _session_override() -> Iterator[Session]:
+        yield db_session
+
+    fake_user = UserRecord(
+        id=user_id, google_subject="fresh-subject", email="fresh@x.com", created_at=datetime.now()
+    )
+
+    with overriding_dependencies(
+        {_get_db_session: _session_override, get_current_user: lambda: fake_user}
+    ):
+        client = TestClient(app)
+        assert client.get("/activities").json() == []
+        assert client.get("/objectif").status_code == 404
+        assert client.get("/plan").status_code == 404
 
 
 def test_sync_endpoint_reports_the_number_of_imported_activities() -> None:
