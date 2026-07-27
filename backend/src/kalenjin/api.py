@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -148,6 +148,23 @@ def _require_user_id(user: UserRecord) -> int:
     return user.id
 
 
+class _HasOptionalId(Protocol):
+    @property
+    def id(self) -> int | None: ...
+
+
+_RecordT = TypeVar("_RecordT", bound=_HasOptionalId)
+
+
+def _require_id(record: _RecordT) -> int:
+    """A record only ever reaches a response mapper, or a follow-up write using its
+    id, after being freshly saved or fetched — so `id` is always populated. Narrows
+    `int | None` to `int` once, instead of a repeated `assert x.id is not None` at
+    each call site (mirrors `_require_user_id` above, generalized past `UserRecord`)."""
+    assert record.id is not None
+    return record.id
+
+
 def get_garmin_connection(
     user: UserRecord = Depends(get_current_user),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -276,9 +293,8 @@ class ObjectifResponse(BaseModel):
 
 
 def _to_objectif_response(objectif: ObjectifRecord) -> ObjectifResponse:
-    assert objectif.id is not None
     return ObjectifResponse(
-        id=objectif.id,
+        id=_require_id(objectif),
         sport=objectif.sport,
         target_distance_meters=objectif.target_distance_meters,
         target_date=objectif.target_date,
@@ -302,9 +318,8 @@ class SeanceResponse(BaseModel):
 
 
 def _to_seance_response(seance: SeanceRecord) -> SeanceResponse:
-    assert seance.id is not None
     return SeanceResponse(
-        id=seance.id,
+        id=_require_id(seance),
         week_start=seance.week_start,
         phase=seance.phase,
         detail=seance.detail,
@@ -326,9 +341,8 @@ class PlanResponse(BaseModel):
 
 
 def _to_plan_response(plan: PlanRecord) -> PlanResponse:
-    assert plan.id is not None
     return PlanResponse(
-        id=plan.id,
+        id=_require_id(plan),
         objectif_id=plan.objectif_id,
         seances=[_to_seance_response(s) for s in plan.seances],
     )
@@ -400,13 +414,13 @@ def google_callback(
     user = user_repo.find_by_google_subject(identity.subject)
     if user is None:
         user = user_repo.create(identity.subject, identity.email)
-    assert user.id is not None
+    user_id = _require_user_id(user)
 
     response = RedirectResponse(auth_config.frontend_base_url)
     response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
     response.set_cookie(
         SESSION_COOKIE_NAME,
-        session_codec.create(user.id),
+        session_codec.create(user_id),
         httponly=True,
         samesite="lax",
         max_age=SESSION_MAX_AGE_SECONDS,
@@ -584,7 +598,7 @@ def create_objectif(
             created_at=datetime.now(),
         )
     )
-    assert objectif.id is not None
+    objectif_id = _require_id(objectif)
 
     current_weekly_volume = estimate_current_weekly_volume(
         scope.activities.list_activities(), today=today
@@ -596,7 +610,7 @@ def create_objectif(
         current_weekly_volume_meters=current_weekly_volume,
     )
     plan = scope.plans.save(
-        PlanRecord(id=None, objectif_id=objectif.id, created_at=datetime.now(), seances=seances)
+        PlanRecord(id=None, objectif_id=objectif_id, created_at=datetime.now(), seances=seances)
     )
     return _to_plan_response(plan)
 
