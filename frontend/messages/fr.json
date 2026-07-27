@@ -1,0 +1,20 @@
+{
+  "nav": {
+    "agenda": "Agenda",
+    "dashboard": "Tableau de bord",
+    "plan": "Plan",
+    "gemini": "Gemini",
+    "garmin": "Garmin",
+    "signOut": "Se déconnecter"
+  },
+  "login": {
+    "title": "Kalenjin",
+    "signInWithGoogle": "Se connecter avec Google",
+    "errors": {
+      "invalidState": "Un problème est survenu au démarrage de la connexion — veuillez réessayer.",
+      "notInvited": "Ce compte Google n'a pas encore été invité sur Kalenjin.",
+      "googleAuthFailed": "Google n'a pas pu confirmer votre identité — veuillez réessayer.",
+      "default": "Un problème est survenu lors de la connexion — veuillez réessayer."
+    }
+  }
+}

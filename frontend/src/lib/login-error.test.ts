@@ -1,20 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { loginErrorMessage } from "@/lib/login-error";
+import { loginErrorKey } from "@/lib/login-error";
 
-describe("loginErrorMessage", () => {
+describe("loginErrorKey", () => {
   it("returns null when there is no error", () => {
-    expect(loginErrorMessage(undefined)).toBeNull();
+    expect(loginErrorKey(undefined)).toBeNull();
   });
 
-  it("returns a specific message for the not-invited error", () => {
-    expect(loginErrorMessage("not_invited")).toMatch(/hasn't been invited/);
+  it("returns the notInvited key for the not-invited error", () => {
+    expect(loginErrorKey("not_invited")).toBe("notInvited");
   });
 
-  it("returns a specific message for an invalid OAuth state", () => {
-    expect(loginErrorMessage("invalid_state")).toMatch(/try again/);
+  it("returns the invalidState key for an invalid OAuth state", () => {
+    expect(loginErrorKey("invalid_state")).toBe("invalidState");
   });
 
-  it("falls back to a generic message for an unrecognized error code", () => {
-    expect(loginErrorMessage("something_unexpected")).toMatch(/went wrong signing in/);
+  it("returns the googleAuthFailed key when Google couldn't confirm identity", () => {
+    expect(loginErrorKey("google_auth_failed")).toBe("googleAuthFailed");
+  });
+
+  it("falls back to the default key for an unrecognized error code", () => {
+    expect(loginErrorKey("something_unexpected")).toBe("default");
   });
 });

@@ -1,10 +1,12 @@
-const MESSAGES: Record<string, string> = {
-  invalid_state: "Something went wrong starting the sign-in flow — please try again.",
-  not_invited: "This Google account hasn't been invited to Kalenjin yet.",
-  google_auth_failed: "Google couldn't confirm your identity — please try again.",
+type ErrorKey = "invalidState" | "notInvited" | "googleAuthFailed" | "default";
+
+const ERROR_KEYS: Record<string, ErrorKey> = {
+  invalid_state: "invalidState",
+  not_invited: "notInvited",
+  google_auth_failed: "googleAuthFailed",
 };
 
-export function loginErrorMessage(error: string | undefined): string | null {
+export function loginErrorKey(error: string | undefined): ErrorKey | null {
   if (!error) return null;
-  return MESSAGES[error] ?? "Something went wrong signing in — please try again.";
+  return ERROR_KEYS[error] ?? "default";
 }
