@@ -7,7 +7,7 @@ from support.fakes import FakeSource
 
 @patch("kalenjin.garmin.client.Garmin")
 def test_garmin_activity_client_satisfies_garmin_session_client(garmin_cls: MagicMock) -> None:
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     assert isinstance(client, GarminSessionClient)
 

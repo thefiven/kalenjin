@@ -28,7 +28,7 @@ def _seance(scheduled_date: date | None = date(2026, 1, 14)) -> SeanceRecord:
 @patch("kalenjin.garmin.client.Garmin")
 def test_push_workout_uploads_and_schedules_a_running_workout(garmin_cls: MagicMock) -> None:
     garmin_cls.return_value.upload_running_workout.return_value = {"workoutId": 42}
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     workout_id = client.push_workout(_seance(), sport="running")
 
@@ -40,7 +40,7 @@ def test_push_workout_uploads_and_schedules_a_running_workout(garmin_cls: MagicM
 @patch("kalenjin.garmin.client.Garmin")
 def test_push_workout_uploads_a_cycling_workout(garmin_cls: MagicMock) -> None:
     garmin_cls.return_value.upload_cycling_workout.return_value = {"workoutId": 7}
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     workout_id = client.push_workout(_seance(), sport="cycling")
 
@@ -53,7 +53,7 @@ def test_push_workout_uploads_a_cycling_workout(garmin_cls: MagicMock) -> None:
 def test_push_workout_raises_when_the_seance_has_no_scheduled_date(
     garmin_cls: MagicMock,
 ) -> None:
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     with pytest.raises(ValueError, match="scheduled_date"):
         client.push_workout(_seance(scheduled_date=None), sport="running")
@@ -61,7 +61,7 @@ def test_push_workout_raises_when_the_seance_has_no_scheduled_date(
 
 @patch("kalenjin.garmin.client.Garmin")
 def test_delete_workout_delegates_to_the_underlying_client(garmin_cls: MagicMock) -> None:
-    client = GarminActivityClient(email="a@b.com", password="secret", tokenstore="/tmp/tokens")
+    client = GarminActivityClient(email="a@b.com", password="secret")
 
     client.delete_workout("42")
 
