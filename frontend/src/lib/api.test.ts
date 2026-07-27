@@ -6,7 +6,7 @@ vi.mock("next/headers", () => ({ cookies: () => Promise.resolve(mockCookieStore)
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-const { fetchActivities, setGeminiApiKey } = await import("@/lib/api");
+const { fetchActivities, setGeminiApiKey, disconnectGarminAccount } = await import("@/lib/api");
 
 describe("fetchActivities", () => {
   beforeEach(() => {
@@ -71,5 +71,35 @@ describe("setGeminiApiKey", () => {
     const result = await setGeminiApiKey("a-key");
 
     expect(result).toEqual({ success: false, error: "Failed to save API key: 500" });
+  });
+});
+
+describe("disconnectGarminAccount", () => {
+  beforeEach(() => {
+    mockCookieStore.get.mockReset();
+    fetchMock.mockReset();
+  });
+
+  it("sends a DELETE request and returns success on a 204", async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+
+    const result = await disconnectGarminAccount();
+
+    expect(result).toEqual({ success: true });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/users/me/garmin-credentials");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("surfaces the backend's error detail when disconnecting fails", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ detail: "Not connected" }),
+    });
+
+    const result = await disconnectGarminAccount();
+
+    expect(result).toEqual({ success: false, error: "Not connected" });
   });
 });

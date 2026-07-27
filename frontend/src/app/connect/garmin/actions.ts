@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { connectGarminAccount, submitGarminMfaCode } from "@/lib/api";
+import { connectGarminAccount, disconnectGarminAccount, submitGarminMfaCode } from "@/lib/api";
 
 export async function connectGarminAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") ?? "").trim();
@@ -35,4 +35,12 @@ export async function submitGarminMfaAction(formData: FormData): Promise<void> {
     redirect("/connect/garmin?error=invalid_mfa_code");
   }
   redirect("/connect/garmin?success=1");
+}
+
+export async function disconnectGarminAction(): Promise<void> {
+  const result = await disconnectGarminAccount();
+  if (!result.success) {
+    redirect("/connect/garmin?error=disconnect_failed");
+  }
+  redirect("/connect/garmin?disconnected=1");
 }

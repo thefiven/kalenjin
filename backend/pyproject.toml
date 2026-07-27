@@ -20,6 +20,7 @@ dependencies = [
 [project.scripts]
 kalenjin-sync = "kalenjin.cli:main"
 kalenjin-invite = "kalenjin.cli:invite_main"
+kalenjin-revoke = "kalenjin.cli:revoke_main"
 
 [project.optional-dependencies]
 dev = [

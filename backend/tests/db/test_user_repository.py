@@ -144,3 +144,74 @@ def test_set_garmin_session_then_find_by_id_returns_it(db_session: Session) -> N
     found = repo.find_by_id(created.id)
     assert found is not None
     assert found.garmin_session_encrypted == "session-ciphertext-1"
+
+
+def test_clear_garmin_credentials_removes_email_password_and_session(
+    db_session: Session,
+) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+    repo.set_garmin_credentials(created.id, "runner@example.com", "ciphertext-1")
+    repo.set_garmin_session(created.id, "session-ciphertext-1")
+
+    repo.clear_garmin_credentials(created.id)
+
+    found = repo.find_by_id(created.id)
+    assert found is not None
+    assert found.garmin_email is None
+    assert found.garmin_password_encrypted is None
+    assert found.garmin_session_encrypted is None
+
+
+def test_clear_garmin_credentials_is_a_no_op_when_nothing_was_connected(
+    db_session: Session,
+) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+
+    repo.clear_garmin_credentials(created.id)  # must not raise
+
+    found = repo.find_by_id(created.id)
+    assert found is not None
+    assert found.garmin_email is None
+
+
+def test_new_user_is_active(db_session: Session) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+
+    created = repo.create("google-subject-1", "friend@example.com")
+
+    assert created.is_active is True
+
+
+def test_revoke_access_removes_the_email_from_the_allowlist(db_session: Session) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    repo.add_to_allowlist("friend@example.com")
+
+    repo.revoke_access("friend@example.com")
+
+    assert repo.is_email_allowed("friend@example.com") is False
+
+
+def test_revoke_access_deactivates_the_existing_user_so_find_by_id_stops_returning_them(
+    db_session: Session,
+) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    created = repo.create("google-subject-1", "friend@example.com")
+    assert created.id is not None
+
+    repo.revoke_access("friend@example.com")
+
+    assert repo.find_by_id(created.id) is None
+
+
+def test_revoke_access_is_a_no_op_when_the_email_was_never_invited_or_created(
+    db_session: Session,
+) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+
+    repo.revoke_access("stranger@example.com")  # must not raise
+
+    assert repo.is_email_allowed("stranger@example.com") is False

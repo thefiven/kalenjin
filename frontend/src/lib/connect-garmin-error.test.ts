@@ -22,6 +22,10 @@ describe("connectGarminErrorMessage", () => {
     expect(connectGarminErrorMessage("invalid_mfa_code")).toMatch(/didn't work/i);
   });
 
+  it("returns a specific message for a failed disconnect", () => {
+    expect(connectGarminErrorMessage("disconnect_failed")).toMatch(/couldn't disconnect/i);
+  });
+
   it("falls back to a generic message for an unrecognized code, never echoing raw input", () => {
     expect(connectGarminErrorMessage("<script>alert(1)</script>")).toBe(
       "Something went wrong — try again.",

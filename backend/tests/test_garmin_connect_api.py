@@ -227,3 +227,36 @@ def test_get_activity_source_surfaces_a_clear_error_when_mfa_is_required_again()
             )
 
     assert exc_info.value.status_code == 400
+
+
+def test_disconnect_garmin_account_clears_email_password_and_session() -> None:
+    key = TEST_ENCRYPTION_CONFIG.secret_encryption_key
+    user = _fake_user(
+        garmin_email="runner@example.com",
+        garmin_password_encrypted=encrypt("hunter2", key),
+        garmin_session_encrypted=encrypt('{"di_token": "abc"}', key),
+    )
+    user_repo = FakeUserRepository(existing=[user])
+
+    with overriding_dependencies(
+        {get_current_user: lambda: user, get_user_repository: lambda: user_repo}
+    ):
+        response = TestClient(app).delete("/users/me/garmin-credentials")
+
+    assert response.status_code == 204
+    stored = user_repo.find_by_id(1)
+    assert stored is not None
+    assert stored.garmin_email is None
+    assert stored.garmin_password_encrypted is None
+    assert stored.garmin_session_encrypted is None
+
+
+def test_disconnect_garmin_account_is_a_204_when_nothing_was_connected() -> None:
+    user_repo = FakeUserRepository(existing=[_fake_user()])
+
+    with overriding_dependencies(
+        {get_current_user: lambda: _fake_user(), get_user_repository: lambda: user_repo}
+    ):
+        response = TestClient(app).delete("/users/me/garmin-credentials")
+
+    assert response.status_code == 204

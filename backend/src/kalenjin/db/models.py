@@ -120,6 +120,7 @@ class User(Base):
     garmin_email: Mapped[str | None] = mapped_column(String, nullable=True)
     garmin_password_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
     garmin_session_encrypted: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class InviteAllowlistEntry(Base):

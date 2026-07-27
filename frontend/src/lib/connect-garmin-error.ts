@@ -3,6 +3,7 @@ const MESSAGES: Record<string, string> = {
   invalid_credentials: "That email or password doesn't work — check it and try again.",
   missing_mfa_code: "Enter the MFA code Garmin sent you.",
   invalid_mfa_code: "That code didn't work, or it expired — start over.",
+  disconnect_failed: "Couldn't disconnect your Garmin account — try again.",
 };
 
 export function connectGarminErrorMessage(error: string | undefined): string | null {
