@@ -547,6 +547,18 @@ def complete_garmin_account_mfa(
     return ConnectGarminResponse(status="connected")
 
 
+@app.delete("/users/me/garmin-credentials", status_code=204)
+def disconnect_garmin_account(
+    user: UserRecord = Depends(get_current_user),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> Response:
+    """Disconnects the user's Garmin account (issue #25 story 18) — sync stops until
+    they reconnect. Idempotent: disconnecting an already-disconnected account is a
+    204, not an error."""
+    user_repo.clear_garmin_credentials(_require_user_id(user))
+    return Response(status_code=204)
+
+
 @app.post("/sync", response_model=SyncResponse)
 def trigger_sync(
     source: ActivitySource = Depends(get_activity_source),

@@ -189,3 +189,19 @@ export async function submitGarminMfaCode(
   }
   return { success: true, status: "connected" };
 }
+
+export type DisconnectGarminResult = { success: true } | { success: false; error: string };
+
+export async function disconnectGarminAccount(): Promise<DisconnectGarminResult> {
+  const res = await fetch(`${API_URL}/users/me/garmin-credentials`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+    cache: "no-store",
+  });
+  if (res.ok) return { success: true };
+
+  return {
+    success: false,
+    error: await _errorFromResponse(res, `Failed to disconnect Garmin account: ${res.status}`),
+  };
+}

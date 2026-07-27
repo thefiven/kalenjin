@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const connectGarminAccountMock = vi.fn();
 const submitGarminMfaCodeMock = vi.fn();
+const disconnectGarminAccountMock = vi.fn();
 vi.mock("@/lib/api", () => ({
   connectGarminAccount: (email: string, password: string) =>
     connectGarminAccountMock(email, password),
   submitGarminMfaCode: (pendingLoginId: string, mfaCode: string) =>
     submitGarminMfaCodeMock(pendingLoginId, mfaCode),
+  disconnectGarminAccount: () => disconnectGarminAccountMock(),
 }));
 
 const redirectMock = vi.fn();
@@ -17,7 +19,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-const { connectGarminAction, submitGarminMfaAction } = await import(
+const { connectGarminAction, submitGarminMfaAction, disconnectGarminAction } = await import(
   "@/app/connect/garmin/actions"
 );
 
@@ -114,5 +116,28 @@ describe("submitGarminMfaAction", () => {
     ).rejects.toThrow();
 
     expect(redirectMock).toHaveBeenCalledWith("/connect/garmin?success=1");
+  });
+});
+
+describe("disconnectGarminAction", () => {
+  beforeEach(() => {
+    disconnectGarminAccountMock.mockReset();
+    redirectMock.mockReset();
+  });
+
+  it("redirects to a disconnected state on success", async () => {
+    disconnectGarminAccountMock.mockResolvedValue({ success: true });
+
+    await expect(disconnectGarminAction()).rejects.toThrow();
+
+    expect(redirectMock).toHaveBeenCalledWith("/connect/garmin?disconnected=1");
+  });
+
+  it("redirects with a fixed error code when disconnecting fails", async () => {
+    disconnectGarminAccountMock.mockResolvedValue({ success: false, error: "boom" });
+
+    await expect(disconnectGarminAction()).rejects.toThrow();
+
+    expect(redirectMock).toHaveBeenCalledWith("/connect/garmin?error=disconnect_failed");
   });
 });

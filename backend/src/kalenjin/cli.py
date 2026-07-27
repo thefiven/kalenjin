@@ -72,5 +72,27 @@ def invite_main(argv: list[str] | None = None) -> None:
     logger.info("Invited %s — they can now sign in with Google", email)
 
 
+def revoke_main(argv: list[str] | None = None) -> None:
+    """Cuts off an invited person's access (issue #25 story 19) — the owner's one-off
+    action, mirroring `invite_main`. Removes the email from the invite allowlist and
+    deactivates any existing `User` row for it, so a session already issued to them
+    stops working on its next authenticated request."""
+    logging.basicConfig(level=logging.INFO)
+    args = argv if argv is not None else sys.argv[1:]
+    if len(args) != 1:
+        raise SystemExit("Usage: kalenjin-revoke <email>")
+    email = args[0]
+
+    db_config = DbConfig()  # type: ignore[call-arg]  # fields are sourced from the environment
+    engine = make_engine(db_config.database_url)
+    session_factory = make_session_factory(engine)
+
+    with session_scope(session_factory) as session:
+        repo = SqlAlchemyUserRepository(session)
+        repo.revoke_access(email)
+
+    logger.info("Revoked %s — they can no longer sign in or use an existing session", email)
+
+
 if __name__ == "__main__":
     main()
