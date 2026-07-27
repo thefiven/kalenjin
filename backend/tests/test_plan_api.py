@@ -4,15 +4,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-from kalenjin.api import (
-    app,
-    get_activity_repository,
-    get_garmin_connection,
-    get_gemini_connection,
-    get_objectif_repository,
-    get_plan_repository,
-    get_rapport_repository,
-)
+from kalenjin.api import app, get_garmin_connection, get_gemini_connection, get_user_scope
 from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
 from kalenjin.sync.domain import ActivityRecord
 from support.api_client import overriding_dependencies
@@ -26,6 +18,7 @@ from support.fakes import (
     FakeRapportRepository,
     FakeRepository,
     RejectsPush,
+    fake_user_scope,
 )
 
 MONDAY = date(2026, 1, 5)
@@ -98,9 +91,9 @@ def test_create_objectif_generates_and_persists_a_plan() -> None:
 
     with overriding_dependencies(
         {
-            get_objectif_repository: lambda: objectif_repo,
-            get_plan_repository: lambda: plan_repo,
-            get_activity_repository: lambda: activity_repo,
+            get_user_scope: lambda: fake_user_scope(
+                activities=activity_repo, objectifs=objectif_repo, plans=plan_repo
+            ),
             get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
     ):
@@ -122,7 +115,7 @@ def test_create_objectif_generates_and_persists_a_plan() -> None:
 
 
 def test_get_active_objectif_returns_404_when_none_exists() -> None:
-    with overriding_dependencies({get_objectif_repository: lambda: FakeObjectifRepository()}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope()}):
         response = TestClient(app).get("/objectif")
 
     assert response.status_code == 404
@@ -131,7 +124,7 @@ def test_get_active_objectif_returns_404_when_none_exists() -> None:
 def test_get_active_objectif_returns_it_when_present() -> None:
     repo = FakeObjectifRepository(existing=[_objectif()])
 
-    with overriding_dependencies({get_objectif_repository: lambda: repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(objectifs=repo)}):
         response = TestClient(app).get("/objectif")
 
     assert response.status_code == 200
@@ -139,7 +132,7 @@ def test_get_active_objectif_returns_it_when_present() -> None:
 
 
 def test_get_active_plan_returns_404_when_none_exists() -> None:
-    with overriding_dependencies({get_plan_repository: lambda: FakePlanRepository()}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope()}):
         response = TestClient(app).get("/plan")
 
     assert response.status_code == 404
@@ -155,7 +148,7 @@ def test_get_active_plan_returns_its_seances() -> None:
         )
     )
 
-    with overriding_dependencies({get_plan_repository: lambda: plan_repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(plans=plan_repo)}):
         response = TestClient(app).get("/plan")
 
     assert response.status_code == 200
@@ -174,7 +167,7 @@ def test_patch_seance_updates_it() -> None:
         )
     )
 
-    with overriding_dependencies({get_plan_repository: lambda: plan_repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(plans=plan_repo)}):
         response = TestClient(app).patch(
             "/plan/seances/1", json={"distance_meters": 8000, "seance_type": "tempo"}
         )
@@ -191,7 +184,7 @@ def test_patch_seance_returns_404_when_missing() -> None:
         existing=PlanRecord(id=1, objectif_id=1, created_at=datetime(2026, 1, 1, 8, 0), seances=[])
     )
 
-    with overriding_dependencies({get_plan_repository: lambda: plan_repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(plans=plan_repo)}):
         response = TestClient(app).patch("/plan/seances/999", json={"distance_meters": 1})
 
     assert response.status_code == 404
@@ -229,10 +222,12 @@ def test_generating_a_rapport_with_a_pain_flag_adjusts_the_upcoming_plan() -> No
 
     with overriding_dependencies(
         {
-            get_activity_repository: lambda: activity_repo,
-            get_rapport_repository: lambda: rapport_repo,
-            get_objectif_repository: lambda: objectif_repo,
-            get_plan_repository: lambda: plan_repo,
+            get_user_scope: lambda: fake_user_scope(
+                activities=activity_repo,
+                rapports=rapport_repo,
+                objectifs=objectif_repo,
+                plans=plan_repo,
+            ),
             get_garmin_connection: lambda: FakeGarminConnection(session=garmin),
             get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
@@ -283,9 +278,9 @@ def test_sync_marks_past_due_seances_completed_against_synced_activities() -> No
     with overriding_dependencies(
         {
             get_garmin_connection: lambda: FakeGarminConnection(session=_EmptySource()),
-            get_activity_repository: lambda: activity_repo,
-            get_objectif_repository: lambda: objectif_repo,
-            get_plan_repository: lambda: plan_repo,
+            get_user_scope: lambda: fake_user_scope(
+                activities=activity_repo, objectifs=objectif_repo, plans=plan_repo
+            ),
             get_gemini_connection: lambda: FakeGeminiConnection(
                 client=FakeLLMClient(_week_response())
             ),
@@ -314,9 +309,7 @@ def test_sync_pushes_a_never_pushed_upcoming_seance() -> None:
     with overriding_dependencies(
         {
             get_garmin_connection: lambda: FakeGarminConnection(session=garmin),
-            get_activity_repository: lambda: FakeRepository(),
-            get_objectif_repository: lambda: objectif_repo,
-            get_plan_repository: lambda: plan_repo,
+            get_user_scope: lambda: fake_user_scope(objectifs=objectif_repo, plans=plan_repo),
             get_gemini_connection: lambda: FakeGeminiConnection(
                 client=FakeLLMClient(_week_response())
             ),
@@ -350,9 +343,7 @@ def test_sync_does_not_re_push_an_already_pushed_unchanged_seance() -> None:
     with overriding_dependencies(
         {
             get_garmin_connection: lambda: FakeGarminConnection(session=garmin),
-            get_activity_repository: lambda: FakeRepository(),
-            get_objectif_repository: lambda: objectif_repo,
-            get_plan_repository: lambda: plan_repo,
+            get_user_scope: lambda: fake_user_scope(objectifs=objectif_repo, plans=plan_repo),
             get_gemini_connection: lambda: FakeGeminiConnection(
                 client=FakeLLMClient(_week_response())
             ),

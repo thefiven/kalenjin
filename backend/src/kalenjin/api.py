@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from functools import lru_cache
 from typing import Literal
@@ -10,6 +10,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from kalenjin.auth.domain import GoogleIdentityVerifier, UserRecord, UserRepository
@@ -83,6 +84,15 @@ def get_pending_garmin_login_store() -> PendingGarminLoginStore:
     return PendingGarminLoginStore()
 
 
+@lru_cache
+def get_engine(database_url: str) -> Engine:
+    """One `Engine` (and its connection pool) for the process's whole lifetime, not one
+    per request — cached by `database_url` itself rather than by `DbConfig` (a pydantic
+    `BaseSettings` instance, not hashable) so this stays a plain `@lru_cache`, matching
+    the `get_x_config` providers above."""
+    return make_engine(database_url)
+
+
 def _get_db_session(db_config: DbConfig = Depends(get_db_config)) -> Iterator[Session]:
     """The request's shared unit-of-work seam: every `get_x_repository` provider below
     depends on this same callable, and FastAPI caches a dependency's result for the
@@ -90,7 +100,7 @@ def _get_db_session(db_config: DbConfig = Depends(get_db_config)) -> Iterator[Se
     share this one session, and can safely cross-reference rows written moments
     earlier in the same not-yet-committed transaction (e.g. `create_objectif` saving a
     Plan that references the Objectif it just saved)."""
-    engine = make_engine(db_config.database_url)
+    engine = get_engine(db_config.database_url)
     session_factory = make_session_factory(engine)
     with session_scope(session_factory) as session:
         yield session
@@ -177,32 +187,31 @@ for _exc_type in (
     app.add_exception_handler(_exc_type, _client_error)
 
 
-def get_activity_repository(
+@dataclass
+class UserScope:
+    """Every repository scoped to the current request's user (issue #28), assembled
+    once instead of via four parallel `Depends()` — the four `SqlAlchemyXRepository`
+    classes are genuinely uniform (`(session, user_id)`, nothing else varies), unlike
+    `GarminConnection`/`GeminiConnection`, which stay separate providers precisely
+    because Garmin/Gemini vary independently and carry real internal complexity."""
+
+    activities: ActivityRepository
+    objectifs: ObjectifRepository
+    plans: PlanRepository
+    rapports: RapportRepository
+
+
+def get_user_scope(
     session: Session = Depends(_get_db_session),
     user: UserRecord = Depends(get_current_user),
-) -> ActivityRepository:
-    return SqlAlchemyActivityRepository(session, _require_user_id(user))
-
-
-def get_rapport_repository(
-    session: Session = Depends(_get_db_session),
-    user: UserRecord = Depends(get_current_user),
-) -> RapportRepository:
-    return SqlAlchemyRapportRepository(session, _require_user_id(user))
-
-
-def get_objectif_repository(
-    session: Session = Depends(_get_db_session),
-    user: UserRecord = Depends(get_current_user),
-) -> ObjectifRepository:
-    return SqlAlchemyObjectifRepository(session, _require_user_id(user))
-
-
-def get_plan_repository(
-    session: Session = Depends(_get_db_session),
-    user: UserRecord = Depends(get_current_user),
-) -> PlanRepository:
-    return SqlAlchemyPlanRepository(session, _require_user_id(user))
+) -> UserScope:
+    user_id = _require_user_id(user)
+    return UserScope(
+        activities=SqlAlchemyActivityRepository(session, user_id),
+        objectifs=SqlAlchemyObjectifRepository(session, user_id),
+        plans=SqlAlchemyPlanRepository(session, user_id),
+        rapports=SqlAlchemyRapportRepository(session, user_id),
+    )
 
 
 def _to_response(activity: ActivityRecord) -> ActivityResponse:
@@ -492,15 +501,13 @@ def disconnect_garmin_account(
 
 @app.post("/sync", response_model=SyncResponse)
 def trigger_sync(
-    repo: ActivityRepository = Depends(get_activity_repository),
-    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-    plan_repo: PlanRepository = Depends(get_plan_repository),
+    scope: UserScope = Depends(get_user_scope),
     garmin: GarminConnection = Depends(get_garmin_connection),
     gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> SyncResponse:
     session = garmin.session()
     orchestrator = SyncOrchestrator(
-        session, repo, objectif_repo, plan_repo, session, gemini.client()
+        session, scope.activities, scope.objectifs, scope.plans, session, gemini.client()
     )
     result = orchestrator.run(today=date.today())
     return SyncResponse(imported_count=result.imported_count)
@@ -510,18 +517,17 @@ def trigger_sync(
 def list_activities(
     since: date | None = None,
     until: date | None = None,
-    repo: ActivityRepository = Depends(get_activity_repository),
+    scope: UserScope = Depends(get_user_scope),
 ) -> list[ActivityResponse]:
-    activities = repo.list_activities(DateRange(since=since, until=until))
+    activities = scope.activities.list_activities(DateRange(since=since, until=until))
     return [_to_response(a) for a in activities]
 
 
 @app.get("/activities/{garmin_activity_id}", response_model=ActivityResponse)
 def get_activity(
-    garmin_activity_id: str,
-    repo: ActivityRepository = Depends(get_activity_repository),
+    garmin_activity_id: str, scope: UserScope = Depends(get_user_scope)
 ) -> ActivityResponse:
-    activity = repo.get_activity(garmin_activity_id)
+    activity = scope.activities.get_activity(garmin_activity_id)
     if activity is None:
         raise HTTPException(status_code=404, detail="Activity not found")
     return _to_response(activity)
@@ -530,19 +536,16 @@ def get_activity(
 @app.post("/activities/{garmin_activity_id}/rapport", response_model=RapportResponse)
 def generate_activity_rapport(
     garmin_activity_id: str,
-    repo: ActivityRepository = Depends(get_activity_repository),
-    rapport_repo: RapportRepository = Depends(get_rapport_repository),
-    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-    plan_repo: PlanRepository = Depends(get_plan_repository),
+    scope: UserScope = Depends(get_user_scope),
     garmin: GarminConnection = Depends(get_garmin_connection),
     gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> RapportResponse:
     session = garmin.session()
     orchestrator = RapportOrchestrator(
-        repo,
-        rapport_repo,
-        objectif_repo,
-        plan_repo,
+        scope.activities,
+        scope.rapports,
+        scope.objectifs,
+        scope.plans,
         session,
         gemini.client(),
         RECENT_RAPPORTS_FOR_ADJUSTMENT,
@@ -555,10 +558,9 @@ def generate_activity_rapport(
 
 @app.get("/activities/{garmin_activity_id}/rapport", response_model=RapportResponse)
 def get_activity_rapport(
-    garmin_activity_id: str,
-    rapport_repo: RapportRepository = Depends(get_rapport_repository),
+    garmin_activity_id: str, scope: UserScope = Depends(get_user_scope)
 ) -> RapportResponse:
-    rapport = rapport_repo.get_for_activity(garmin_activity_id)
+    rapport = scope.rapports.get_for_activity(garmin_activity_id)
     if rapport is None:
         raise HTTPException(status_code=404, detail="Rapport not found")
     return _to_rapport_response(rapport)
@@ -567,14 +569,12 @@ def get_activity_rapport(
 @app.post("/objectif", response_model=PlanResponse)
 def create_objectif(
     body: ObjectifRequest,
-    activity_repo: ActivityRepository = Depends(get_activity_repository),
-    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-    plan_repo: PlanRepository = Depends(get_plan_repository),
+    scope: UserScope = Depends(get_user_scope),
     gemini: GeminiConnection = Depends(get_gemini_connection),
 ) -> PlanResponse:
     """Creates an `Objectif` and generates its `Plan` (ADR-0001, issue #4)."""
     today = date.today()
-    objectif = objectif_repo.save(
+    objectif = scope.objectifs.save(
         ObjectifRecord(
             id=None,
             sport=body.sport,
@@ -587,7 +587,7 @@ def create_objectif(
     assert objectif.id is not None
 
     current_weekly_volume = estimate_current_weekly_volume(
-        activity_repo.list_activities(), today=today
+        scope.activities.list_activities(), today=today
     )
     seances = generate_plan_seances(
         objectif,
@@ -595,27 +595,23 @@ def create_objectif(
         today=today,
         current_weekly_volume_meters=current_weekly_volume,
     )
-    plan = plan_repo.save(
+    plan = scope.plans.save(
         PlanRecord(id=None, objectif_id=objectif.id, created_at=datetime.now(), seances=seances)
     )
     return _to_plan_response(plan)
 
 
 @app.get("/objectif", response_model=ObjectifResponse)
-def get_active_objectif(
-    objectif_repo: ObjectifRepository = Depends(get_objectif_repository),
-) -> ObjectifResponse:
-    objectif = objectif_repo.get_active()
+def get_active_objectif(scope: UserScope = Depends(get_user_scope)) -> ObjectifResponse:
+    objectif = scope.objectifs.get_active()
     if objectif is None:
         raise HTTPException(status_code=404, detail="No active objectif")
     return _to_objectif_response(objectif)
 
 
 @app.get("/plan", response_model=PlanResponse)
-def get_active_plan(
-    plan_repo: PlanRepository = Depends(get_plan_repository),
-) -> PlanResponse:
-    plan = plan_repo.get_active()
+def get_active_plan(scope: UserScope = Depends(get_user_scope)) -> PlanResponse:
+    plan = scope.plans.get_active()
     if plan is None:
         raise HTTPException(status_code=404, detail="No active plan")
     return _to_plan_response(plan)
@@ -623,17 +619,15 @@ def get_active_plan(
 
 @app.patch("/plan/seances/{seance_id}", response_model=SeanceResponse)
 def update_seance(
-    seance_id: int,
-    body: SeanceUpdateRequest,
-    plan_repo: PlanRepository = Depends(get_plan_repository),
+    seance_id: int, body: SeanceUpdateRequest, scope: UserScope = Depends(get_user_scope)
 ) -> SeanceResponse:
     """Manual edit of a séance from the dashboard/agenda (issue #4)."""
-    plan = plan_repo.get_active()
+    plan = scope.plans.get_active()
     seance = next((s for s in (plan.seances if plan else []) if s.id == seance_id), None)
     if seance is None:
         raise HTTPException(status_code=404, detail="Seance not found")
 
     updates = body.model_dump(exclude_unset=True)
     updated = replace(seance, **updates)
-    plan_repo.update_seances([updated])
+    scope.plans.update_seances([updated])
     return _to_seance_response(updated)

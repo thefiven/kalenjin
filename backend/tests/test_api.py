@@ -9,13 +9,11 @@ from sqlalchemy.orm import Session
 from kalenjin.api import (
     _get_db_session,
     app,
-    get_activity_repository,
     get_current_user,
+    get_engine,
     get_garmin_connection,
     get_gemini_connection,
-    get_objectif_repository,
-    get_plan_repository,
-    get_rapport_repository,
+    get_user_scope,
 )
 from kalenjin.auth.domain import UserRecord
 from kalenjin.rapport.domain import RapportRecord
@@ -25,11 +23,10 @@ from support.fakes import (
     FakeGarminConnection,
     FakeGeminiConnection,
     FakeLLMClient,
-    FakeObjectifRepository,
-    FakePlanRepository,
     FakeRapportRepository,
     FakeRepository,
     RejectsPush,
+    fake_user_scope,
     raw_activity,
 )
 
@@ -55,6 +52,25 @@ def test_health_check() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_get_engine_is_cached_for_the_same_database_url() -> None:
+    """`_get_db_session` runs once per HTTP request, not once per process — without
+    caching, every request would open a fresh connection pool and abandon it at
+    request end. `get_engine` is cached by `database_url` (a plain, hashable string,
+    unlike `DbConfig` itself) so the process holds exactly one `Engine`/pool for its
+    lifetime."""
+    first = get_engine("postgresql+psycopg://cache-test-a")
+    second = get_engine("postgresql+psycopg://cache-test-a")
+
+    assert first is second
+
+
+def test_get_engine_returns_a_distinct_engine_per_database_url() -> None:
+    first = get_engine("postgresql+psycopg://cache-test-b")
+    second = get_engine("postgresql+psycopg://cache-test-c")
+
+    assert first is not second
 
 
 @pytest.mark.integration
@@ -94,9 +110,7 @@ def test_sync_endpoint_reports_the_number_of_imported_activities() -> None:
     with overriding_dependencies(
         {
             get_garmin_connection: lambda: FakeGarminConnection(session=source),
-            get_activity_repository: lambda: repo,
-            get_objectif_repository: lambda: FakeObjectifRepository(),
-            get_plan_repository: lambda: FakePlanRepository(),
+            get_user_scope: lambda: fake_user_scope(activities=repo),
             get_gemini_connection: lambda: FakeGeminiConnection(client=FakeLLMClient("")),
         }
     ):
@@ -125,7 +139,7 @@ def test_list_activities_returns_activities_most_recent_first() -> None:
             _record("2", datetime(2024, 6, 5, 7, 0)),
         ]
     )
-    with overriding_dependencies({get_activity_repository: lambda: repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(activities=repo)}):
         response = TestClient(app).get("/activities")
 
     assert response.status_code == 200
@@ -140,7 +154,7 @@ def test_list_activities_filters_by_date_range() -> None:
             _record("2", datetime(2024, 6, 5, 7, 0)),
         ]
     )
-    with overriding_dependencies({get_activity_repository: lambda: repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(activities=repo)}):
         response = TestClient(app).get("/activities", params={"since": "2024-06-01"})
 
     assert response.status_code == 200
@@ -150,7 +164,7 @@ def test_list_activities_filters_by_date_range() -> None:
 
 def test_get_activity_by_id_returns_its_detail() -> None:
     repo = FakeRepository(existing=[_record("42", datetime(2024, 6, 1, 7, 0), sport="cycling")])
-    with overriding_dependencies({get_activity_repository: lambda: repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(activities=repo)}):
         response = TestClient(app).get("/activities/42")
 
     assert response.status_code == 200
@@ -162,7 +176,7 @@ def test_get_activity_by_id_returns_its_detail() -> None:
 
 def test_get_activity_by_id_returns_404_when_missing() -> None:
     repo = FakeRepository()
-    with overriding_dependencies({get_activity_repository: lambda: repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(activities=repo)}):
         response = TestClient(app).get("/activities/does-not-exist")
 
     assert response.status_code == 404
@@ -178,10 +192,9 @@ def test_generate_rapport_creates_and_persists_a_rapport() -> None:
 
     with overriding_dependencies(
         {
-            get_activity_repository: lambda: activity_repo,
-            get_rapport_repository: lambda: rapport_repo,
-            get_objectif_repository: lambda: FakeObjectifRepository(),
-            get_plan_repository: lambda: FakePlanRepository(),
+            get_user_scope: lambda: fake_user_scope(
+                activities=activity_repo, rapports=rapport_repo
+            ),
             get_garmin_connection: lambda: FakeGarminConnection(session=_AnyRangeSource([])),
             get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
@@ -203,10 +216,9 @@ def test_generate_rapport_returns_404_when_activity_is_missing() -> None:
 
     with overriding_dependencies(
         {
-            get_activity_repository: lambda: activity_repo,
-            get_rapport_repository: lambda: rapport_repo,
-            get_objectif_repository: lambda: FakeObjectifRepository(),
-            get_plan_repository: lambda: FakePlanRepository(),
+            get_user_scope: lambda: fake_user_scope(
+                activities=activity_repo, rapports=rapport_repo
+            ),
             get_garmin_connection: lambda: FakeGarminConnection(session=_AnyRangeSource([])),
             get_gemini_connection: lambda: FakeGeminiConnection(client=llm),
         }
@@ -231,7 +243,7 @@ def test_get_rapport_returns_the_persisted_rapport() -> None:
         ]
     )
 
-    with overriding_dependencies({get_rapport_repository: lambda: rapport_repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(rapports=rapport_repo)}):
         response = TestClient(app).get("/activities/1/rapport")
 
     assert response.status_code == 200
@@ -243,7 +255,7 @@ def test_get_rapport_returns_the_persisted_rapport() -> None:
 def test_get_rapport_returns_404_when_missing() -> None:
     rapport_repo = FakeRapportRepository()
 
-    with overriding_dependencies({get_rapport_repository: lambda: rapport_repo}):
+    with overriding_dependencies({get_user_scope: lambda: fake_user_scope(rapports=rapport_repo)}):
         response = TestClient(app).get("/activities/does-not-exist/rapport")
 
     assert response.status_code == 404

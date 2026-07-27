@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 
+from kalenjin.api import UserScope
 from kalenjin.auth.domain import GoogleIdentity, UserRecord
 from kalenjin.auth.google_client import GoogleAuthError
 from kalenjin.garmin.connection import (
@@ -12,9 +13,15 @@ from kalenjin.garmin.connection import (
 from kalenjin.garmin.domain import GarminSessionClient
 from kalenjin.llm.connection import GeminiNotConnectedError
 from kalenjin.llm.domain import LLMClient
-from kalenjin.plan.domain import ObjectifRecord, PlanRecord, SeanceRecord
-from kalenjin.rapport.domain import RapportRecord
-from kalenjin.sync.domain import ActivityRecord, DateRange
+from kalenjin.plan.domain import (
+    ObjectifRecord,
+    ObjectifRepository,
+    PlanRecord,
+    PlanRepository,
+    SeanceRecord,
+)
+from kalenjin.rapport.domain import RapportRecord, RapportRepository
+from kalenjin.sync.domain import ActivityRecord, ActivityRepository, DateRange
 
 
 class RejectsPush:
@@ -179,6 +186,22 @@ class FakePlanRepository:
             self._next_id += 1
         self._plan = replace(self._plan, seances=remaining + inserted)
         return inserted
+
+
+def fake_user_scope(
+    activities: ActivityRepository | None = None,
+    objectifs: ObjectifRepository | None = None,
+    plans: PlanRepository | None = None,
+    rapports: RapportRepository | None = None,
+) -> UserScope:
+    """A `UserScope` built from fakes, defaulting each repository to an empty one so a
+    test only has to name the repos it actually cares about."""
+    return UserScope(
+        activities=activities or FakeRepository(),
+        objectifs=objectifs or FakeObjectifRepository(),
+        plans=plans or FakePlanRepository(),
+        rapports=rapports or FakeRapportRepository(),
+    )
 
 
 class FakeGarminPushClient:
